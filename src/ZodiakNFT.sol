@@ -9,7 +9,7 @@ import {
 contract ZodiakNFT is ERC1155URIStorage {
     using Strings for uint256;
 
-    address immutable CosmicLottery;
+    // address immutable CosmicLottery;
     address private theMighty;
     address private theOracle;
     uint256 private maxCollections = 19;
@@ -29,7 +29,7 @@ contract ZodiakNFT is ERC1155URIStorage {
     // Only the CosmicLottery and theMighty can call this function
     modifier cosmicAuthority() {
         require(
-            msg.sender == CosmicLottery || 
+            msg.sender == theOracle ||
             msg.sender == theMighty, 
             "Only Cosmic powers can call this function"
             );
@@ -37,10 +37,11 @@ contract ZodiakNFT is ERC1155URIStorage {
     }
 
     constructor(string memory _uri, address _theMighty) ERC1155(_uri) {
-        CosmicLottery = msg.sender;
+        // CosmicLottery = msg.sender;
         theMighty = _theMighty;
     }
 
+    //CHECK: bookkeeping ?
     //astralBirth or summonLuck
     function summonLuck(uint256 _amount) public payable {
         require(msg.value >= price * _amount, "Incorrect amount");
