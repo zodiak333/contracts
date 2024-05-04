@@ -37,7 +37,6 @@ contract ZodiakNFT is ERC1155URIStorage {
     }
 
     constructor(string memory _uri, address _theMighty) ERC1155(_uri) {
-        // CosmicLottery = msg.sender;
         theMighty = _theMighty;
     }
 

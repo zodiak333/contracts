@@ -39,14 +39,13 @@ contract ZodiakLottery is ZodiakNFT {
         uint256 startTimestamp;
         uint256 endTimestamp;
         uint256 pot;
+        uint256 remainingPot;
         uint256 numberOfWinningTickets;
         uint256 tier1;
         uint256 tier2;
         uint256 tier3;
         uint256 tier4;
         uint256 tier5;
-        uint256 prize4Winners;
-        uint256 prize5Winners;
         uint256[5] winningTicketsRemaining; // 0 = 1st prize, 1 = 2nd prize, 2 = 3rd prize, 3 = 4th prize, 4 = 5th prize
         uint256 unusedPrizeTickets;
     }
@@ -114,17 +113,17 @@ contract ZodiakLottery is ZodiakNFT {
 
         //win or loose
         if (randomNumber < 12) {
-            // win: mutate the token into winning ticket
-            cosmicMutation(WHEEL_TICKET, WINNING_TOKEN_ID, msg.sender);
-
             //make sure the number of winning tickets of a the current pool is accounted for
             lotteryPools[lotteryPools.length - 1].numberOfWinningTickets++;
             lotteryPools[lotteryPools.length - 1].unusedPrizeTickets++;
             win = true;
+
+            // win: mutate the token into winning ticket
+            cosmicMutation(WHEEL_TICKET, WINNING_TOKEN_ID, msg.sender);
         } else {
-            //lose: mutate the token into the zodiak booster
-            cosmicMutation(WHEEL_TICKET, _zodiakChoice, msg.sender);
             win = false;
+            //lose: mutate the token into the zodiak booster of choice
+            cosmicMutation(WHEEL_TICKET, _zodiakChoice, msg.sender);
         }
     }
 
@@ -187,6 +186,14 @@ contract ZodiakLottery is ZodiakNFT {
         }
         lotteryPools[_poolId].unusedPrizeTickets--;
         cosmicMutation(WINNING_TOKEN_ID, prizeTokenId, msg.sender);
+    }
+
+    //Skim the funds of a fully redeemed pool
+    function skimPool(uint _poolId) public cosmicAuthority() {
+        require(block.timestamp > lotteryPools[_poolId].endTimestamp, "Cannot skim pool yet");
+        require(lotteryPools[_poolId].unusedPrizeTickets == 0, "Pool not fully redeemed");
+        //TODO: maybe instead of just transfering, it can be allocated (to a new pool? for other things?)
+        payable(COSMIC_VAULT).transfer(lotteryPools[_poolId].remainingPot);
     }
 }
 
