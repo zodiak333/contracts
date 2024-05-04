@@ -5,10 +5,10 @@ import {Test, console2} from "forge-std/Test.sol";
 import {ZodiakLottery} from "../src/ZodiakLottery.sol";
 
 contract LotteryTest is Test {
-    ZodiakNFT public lottery;
+    ZodiakLottery public lottery;
 
     function setUp() public {
-        lottery = new ZodiakLottery();
+        lottery = new ZodiakLottery(address(0), address(0));
         
     }
 
