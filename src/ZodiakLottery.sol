@@ -38,7 +38,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     uint256 constant WINNING_TOKEN_ID = 13; //the id of the winning undisclosed token
     uint256 ticketPrice = 0.01 ether;
     Pool[] public lotteryPools;
-    mapping(uint256 requestID => RequestVRF request) requests;
+    mapping(uint256 requestID => RequestVRF request) public requests;
     mapping(address => mapping(uint256 => uint256[5])) public userWinningTickets; // 0 = 1st prize, 1 = 2nd prize, 2 = 3rd prize, 3 = 4th prize, 4 = 5th prize
 
 //CHECK: use packing
@@ -68,8 +68,8 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     address constant SEPOLIA_VRF_COORDINATOR = 0x9DdfaCa8183c41ad55329BdeeD9F6A8d53168B1B;
     uint256 s_subscriptionId = 20406656112607748875103932091356574480957515311019163390203649607360869579051;
     bytes32 keyHash = 0x787d74caea10b2b357790d5b5247c2f63d1d91572a9846f780606e4d953677ae;
-    uint32 callbackGasLimit = 300000;
-    uint16 requestConfirmations = 1;
+    uint32 callbackGasLimit = 400000;
+    uint16 requestConfirmations = 3;
     uint32 numWords = 1;
 
 
@@ -153,6 +153,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         );
 
         uint256 requestID = requestRandomWords();
+        emit Test(requestID, 0);
 
         requests[requestID] = RequestVRF(_zodiakChoice, 0, true);
        
@@ -297,12 +298,10 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
                 callbackGasLimit: callbackGasLimit,
                 numWords: numWords,
                 extraArgs: VRFV2PlusClient._argsToBytes(
-                    VRFV2PlusClient.ExtraArgsV1({nativePayment: true})
+                    VRFV2PlusClient.ExtraArgsV1({nativePayment: false})
                 )
             })
         );
-        
-        return requestId;
     }
 
         /**
