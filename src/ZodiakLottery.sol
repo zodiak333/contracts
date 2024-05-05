@@ -27,14 +27,21 @@ pragma solidity 0.8.25;
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {ZodiakNFT} from "./ZodiakNFT.sol";
+import {IVRFCoordinatorV2Plus} from "@chainlink/contracts/src/v0.8/vrf/dev/interfaces/IVRFCoordinatorV2Plus.sol";
+import {VRFConsumerBaseV2Plus} from "@chainlink/contracts/src/v0.8/vrf/dev/VRFConsumerBaseV2Plus.sol";
+import {VRFV2PlusClient} from "@chainlink/contracts/src/v0.8/vrf/dev/libraries/VRFV2PlusClient.sol";
 
-contract ZodiakLottery is ZodiakNFT {
-    ZodiakNFT public immutable ZDK;
-    uint256 constant WHEEL_TICKET = 0;
-    uint256 constant WINNING_TOKEN_ID = 13;
-    address immutable COSMIC_VAULT;
+contract ZodiakLottery is VRFConsumerBaseV2Plus {
+    ZodiakNFT public immutable ZDK; //ZodiakNFT contract
+    address immutable COSMIC_VAULT; //The holder of money for easier accountability.
+    uint256 constant WHEEL_TICKET = 0; //the id of the wheel ticket
+    uint256 constant WINNING_TOKEN_ID = 13; //the id of the winning undisclosed token
+    uint256 ticketPrice = 0.01 ether;
+    Pool[] public lotteryPools;
+    mapping(uint256 requestID => RequestVRF request) requests;
+    mapping(address => mapping(uint256 => uint256[5])) public userWinningTickets; // 0 = 1st prize, 1 = 2nd prize, 2 = 3rd prize, 3 = 4th prize, 4 = 5th prize
 
-    //CHECK: maybe can use packing
+//CHECK: use packing
     struct Pool {
         uint256 startTimestamp;
         uint256 endTimestamp;
@@ -50,16 +57,46 @@ contract ZodiakLottery is ZodiakNFT {
         uint256 unusedPrizeTickets;
     }
 
-    mapping(address user => mapping(uint256 poolId => uint256[5])) public userWinningTickets; // 0 = 1st prize, 1 = 2nd prize, 2 = 3rd prize, 3 = 4th prize, 4 = 5th prize
-
-    Pool[] public lotteryPools;
-
-    constructor(address _theMighty, address _cosmicVault) ZodiakNFT("https://zodiaknft.com/", _theMighty) {
-        COSMIC_VAULT = _cosmicVault;
+    struct RequestVRF {
+        uint256 zodiakChoice;
+        uint256 poolId;
+        bool isSpin;
     }
 
-    function createPool() public cosmicAuthority {
-        require(block.timestamp > lotteryPools[lotteryPools.length - 1].endTimestamp, "Cannot create new pool yet");
+    //CHAINLINK VARIABLES
+    IVRFCoordinatorV2Plus COORDINATOR;
+    address constant SEPOLIA_VRF_COORDINATOR = 0x9DdfaCa8183c41ad55329BdeeD9F6A8d53168B1B;
+    uint256 s_subscriptionId = 20406656112607748875103932091356574480957515311019163390203649607360869579051;
+    bytes32 keyHash = 0x787d74caea10b2b357790d5b5247c2f63d1d91572a9846f780606e4d953677ae;
+    uint32 callbackGasLimit = 300000;
+    uint16 requestConfirmations = 1;
+    uint32 numWords = 1;
+
+
+    event Test(uint256 num1, uint256 num2);
+
+    constructor(address _theMighty, address _cosmicVault)
+        VRFConsumerBaseV2Plus(SEPOLIA_VRF_COORDINATOR)
+    {
+        COSMIC_VAULT = _cosmicVault;
+        COORDINATOR = IVRFCoordinatorV2Plus(SEPOLIA_VRF_COORDINATOR);
+        lotteryPools.push(
+            Pool(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [uint256(0), 0, 0, 0, 0], 0)
+        );
+        ZDK = new ZodiakNFT("https://zodiaknft.com/", _theMighty);
+    }
+
+    function createTicket(uint256 _amount) external payable {
+        require(msg.value >= 0.01 ether * _amount, "Incorrect amount");
+        ZDK.createTicket(_amount, msg.sender);
+    }
+
+    function createPool() public {
+        require(
+            block.timestamp >
+                lotteryPools[lotteryPools.length - 1].endTimestamp,
+            "Cannot create new pool yet"
+        );
         Pool memory newPool;
         newPool.startTimestamp = block.timestamp;
         newPool.endTimestamp = block.timestamp + 3 hours;
@@ -68,48 +105,65 @@ contract ZodiakLottery is ZodiakNFT {
 
     //WARNING: with rounding, each ticket might not be accounted for, add a check for that in favor of last prize.
     //Also needs to take into account that maybe no one will win 3 first prizes
-    function tallyPool() public cosmicAuthority {
+    function tallyPool() public {
         Pool memory currentPoolM = lotteryPools[lotteryPools.length - 1];
         Pool storage currentPoolS = lotteryPools[lotteryPools.length - 1];
 
         // calculate and transfer fees for the house before distributing the pot
-        uint256 fees = currentPoolM.pot * 10 / 100;
+        uint256 fees = (currentPoolM.pot * 10) / 100;
 
         currentPoolS.pot = currentPoolM.pot = currentPoolM.pot - fees;
 
-        require(block.timestamp > currentPoolM.endTimestamp, "Cannot tally pool yet");
+        require(
+            block.timestamp > currentPoolM.endTimestamp,
+            "Cannot tally pool yet"
+        );
         require(currentPoolM.numberOfWinningTickets > 0, "No winning tickets");
-        currentPoolS.tier1 = currentPoolM.pot * 25 / 100;
-        currentPoolS.tier2 = currentPoolM.pot * 10 / 100;
-        currentPoolS.tier3 = currentPoolM.pot * 5 / 100;
-        currentPoolS.tier4 = currentPoolM.pot * 20 / 100;
-        currentPoolS.tier5 = currentPoolM.pot * 40 / 100;
+        currentPoolS.tier1 = (currentPoolM.pot * 25) / 100;
+        currentPoolS.tier2 = (currentPoolM.pot * 10) / 100;
+        currentPoolS.tier3 = (currentPoolM.pot * 5) / 100;
+        currentPoolS.tier4 = (currentPoolM.pot * 20) / 100;
+        currentPoolS.tier5 = (currentPoolM.pot * 40) / 100;
         currentPoolS.winningTicketsRemaining = [
             1,
             1,
             1,
-            (currentPoolM.numberOfWinningTickets - 2) * 30 / 100,
-            (currentPoolM.numberOfWinningTickets - 1) * 70 / 100
+            ((currentPoolM.numberOfWinningTickets - 2) * 30) / 100,
+            ((currentPoolM.numberOfWinningTickets - 1) * 70) / 100
         ];
         //WARNING: for now add 3 more tickets to prize 4 & 5 to handle case no winners of first 3 prizes
+        //WARNING: cosmic vault not implemented , should have bookkeeping
         payable(COSMIC_VAULT).transfer(fees);
     }
 
-    /**
-     * @dev Spin the wheel and see if you win or not; 12% chance of winning
-     * @param _zodiakChoice the id of the zodiak to mutate to
-     * @return win true if the user wins, false otherwise
-     */
-    function spinTheWheel(uint256 _zodiakChoice) public returns (bool win) {
-        require(block.timestamp < lotteryPools[lotteryPools.length - 1].endTimestamp, "Cannot spin the wheel yet");
-        require(balanceOf(msg.sender, WHEEL_TICKET) >= 1, "Insufficient balance");
-        require(_zodiakChoice > 0 && _zodiakChoice < WINNING_TOKEN_ID, "Invalid id");
+    
+    function launchSpin(uint256 _zodiakChoice) public {
+        require(
+            block.timestamp <
+                lotteryPools[lotteryPools.length - 1].endTimestamp,
+            "Cannot spin the wheel yet"
+        );
+        require(
+            ZDK.balanceOf(msg.sender, WHEEL_TICKET) >= 1,
+            "Insufficient balance"
+        );
+        require(
+            _zodiakChoice > 0 && _zodiakChoice < WINNING_TOKEN_ID,
+            "Invalid id"
+        );
 
-        ////When the wheel is spinned, the price of a ticket is added to the pot
+        uint256 requestID = requestRandomWords();
+
+        requests[requestID] = RequestVRF(_zodiakChoice, 0, true);
+       
+    }
+
+    function spinTheWheel(uint256 _zodiakChoice, uint256 _randomWord) internal returns(bool win){
+        //When the wheel is spinned, the price of a ticket is added to the pot
         lotteryPools[lotteryPools.length - 1].pot += 0.01 ether;
 
         //get a random number between 0 and 100
-        uint256 randomNumber = uint256(keccak256(abi.encodePacked(block.timestamp, msg.sender, _zodiakChoice))) % 101;
+        uint256 randomNumber = _randomWord % 101;
 
         //win or loose
         if (randomNumber < 12) {
@@ -119,11 +173,11 @@ contract ZodiakLottery is ZodiakNFT {
             win = true;
 
             // win: mutate the token into winning ticket
-            cosmicMutation(WHEEL_TICKET, WINNING_TOKEN_ID, msg.sender);
+            ZDK.cosmicMutation(WHEEL_TICKET, WINNING_TOKEN_ID, msg.sender);
         } else {
             win = false;
             //lose: mutate the token into the zodiak booster of choice
-            cosmicMutation(WHEEL_TICKET, _zodiakChoice, msg.sender);
+            ZDK.cosmicMutation(WHEEL_TICKET, _zodiakChoice, msg.sender);
         }
     }
 
@@ -135,13 +189,25 @@ contract ZodiakLottery is ZodiakNFT {
     //natspec comment
     /**
      * @dev Reveal the prize ticket
-     * @return prizeTokenId the id of the prize token
      */
-    function revealPrize(uint256 _poolId) public returns (uint256 prizeTokenId) {
-        require(balanceOf(msg.sender, WINNING_TOKEN_ID) > 0, "Insufficient balance");
+    function launchReveal(uint256 _poolId)
+        public
+    {
+        require(
+            ZDK.balanceOf(msg.sender, WINNING_TOKEN_ID) > 0,
+            "Insufficient balance"
+        );
+
+        uint256 requestID = requestRandomWords();
+
+        requests[requestID] = RequestVRF(0 ,_poolId, false);
+        
+    }
+
+    function revealPrize(uint256 _poolId, uint256 _randomWord) internal returns(uint256 prizeTokenId){
 
         //get a random number between 0 and 100
-        uint256 randomNumber = uint256(keccak256(abi.encodePacked(block.timestamp, msg.sender, "Zodiak"))) % 100;
+        uint256 randomNumber = _randomWord % 101;
 
         if (randomNumber <= 10) {
             if (lotteryPools[_poolId].winningTicketsRemaining[0] == 1) {
@@ -151,7 +217,9 @@ contract ZodiakLottery is ZodiakNFT {
             } else {
                 prizeTokenId = 15;
             }
-        } else if (randomNumber <= 20 && randomNumber > 10 || prizeTokenId == 15) {
+        } else if (
+            (randomNumber <= 20 && randomNumber > 10) || prizeTokenId == 15
+        ) {
             if (lotteryPools[_poolId].winningTicketsRemaining[1] == 1) {
                 prizeTokenId = 15;
                 userWinningTickets[msg.sender][lotteryPools.length - 1][1]++;
@@ -159,7 +227,9 @@ contract ZodiakLottery is ZodiakNFT {
             } else {
                 prizeTokenId = 16;
             }
-        } else if (randomNumber <= 30 && randomNumber > 20 || prizeTokenId == 16) {
+        } else if (
+            (randomNumber <= 30 && randomNumber > 20) || prizeTokenId == 16
+        ) {
             if (lotteryPools[_poolId].winningTicketsRemaining[2] == 1) {
                 prizeTokenId = 16;
                 userWinningTickets[msg.sender][lotteryPools.length - 1][2]++;
@@ -177,23 +247,70 @@ contract ZodiakLottery is ZodiakNFT {
             }
         } else if (randomNumber > 60 || prizeTokenId == 18) {
             if (lotteryPools[_poolId].winningTicketsRemaining[3] > 0) {
-            prizeTokenId = 18;
-            userWinningTickets[msg.sender][lotteryPools.length - 1][4]++;
-            lotteryPools[_poolId].winningTicketsRemaining[4]--;
+                prizeTokenId = 18;
+                userWinningTickets[msg.sender][lotteryPools.length - 1][4]++;
+                lotteryPools[_poolId].winningTicketsRemaining[4]--;
             } else {
                 prizeTokenId = 17;
             }
         }
         lotteryPools[_poolId].unusedPrizeTickets--;
-        cosmicMutation(WINNING_TOKEN_ID, prizeTokenId, msg.sender);
+        ZDK.cosmicMutation(WINNING_TOKEN_ID, prizeTokenId, msg.sender);
     }
 
     //Skim the funds of a fully redeemed pool
-    function skimPool(uint _poolId) public cosmicAuthority() {
-        require(block.timestamp > lotteryPools[_poolId].endTimestamp, "Cannot skim pool yet");
-        require(lotteryPools[_poolId].unusedPrizeTickets == 0, "Pool not fully redeemed");
+    function skimPool(uint256 _poolId) public {
+        require(
+            block.timestamp > lotteryPools[_poolId].endTimestamp,
+            "Cannot skim pool yet"
+        );
+        require(
+            lotteryPools[_poolId].unusedPrizeTickets == 0,
+            "Pool not fully redeemed"
+        );
         //TODO: maybe instead of just transfering, it can be allocated (to a new pool? for other things?)
         payable(COSMIC_VAULT).transfer(lotteryPools[_poolId].remainingPot);
+    }
+
+    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
+        internal
+        override
+    {
+        if (requests[requestId].isSpin) {
+            spinTheWheel(requests[requestId].zodiakChoice, randomWords[0]);
+        } else {
+            revealPrize(requests[requestId].poolId, randomWords[0]);
+        }
+    }
+
+    function requestRandomWords()
+        public
+        returns (uint256 requestId)
+    {
+        // Will revert if subscription is not set and funded.
+        // To enable payment in native tokens, set nativePayment to true.
+        requestId = COORDINATOR.requestRandomWords(
+            VRFV2PlusClient.RandomWordsRequest({
+                keyHash: keyHash,
+                subId: s_subscriptionId,
+                requestConfirmations: requestConfirmations,
+                callbackGasLimit: callbackGasLimit,
+                numWords: numWords,
+                extraArgs: VRFV2PlusClient._argsToBytes(
+                    VRFV2PlusClient.ExtraArgsV1({nativePayment: true})
+                )
+            })
+        );
+        
+        return requestId;
+    }
+
+        /**
+     * @dev Set the price of the wheel spinning ticket
+     * @param _price the price of the NFT
+     */
+    function setPrice(uint256 _price) public {
+        ticketPrice = _price;
     }
 }
 
