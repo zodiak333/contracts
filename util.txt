@@ -1,0 +1,9 @@
+For every dev : new branch to be created
+git checkout -b test-branch
+git add .
+git commit -m "text xxx "
+git push origin test-branch
+
+créer une pull request sur github
+une fois validée et ok -> delete branch 
+git branch -d branch1
