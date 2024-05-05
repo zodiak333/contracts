@@ -8,7 +8,7 @@ pragma solidity 0.8.25;
 //     Taurus(2),
 //     Gemini(3),
 //     Cancer(4),
-//     Leo(5),h
+//     Leo(5),
 //     Virgo (6),
 //     Libra (7),
 //     Scorpio (8),

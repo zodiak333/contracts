@@ -1,0 +1,6 @@
+{
+    "remappings": [
+        "@openzeppelin/=lib/openzeppelin-contracts/",
+        "@chainlink/=lib/chainlink-brownie-contracts/"
+]
+}
