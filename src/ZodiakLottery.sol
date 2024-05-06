@@ -31,6 +31,16 @@ import {IVRFCoordinatorV2Plus} from "@chainlink/contracts/src/v0.8/vrf/dev/inter
 import {VRFConsumerBaseV2Plus} from "@chainlink/contracts/src/v0.8/vrf/dev/VRFConsumerBaseV2Plus.sol";
 import {VRFV2PlusClient} from "@chainlink/contracts/src/v0.8/vrf/dev/libraries/VRFV2PlusClient.sol";
 
+error IncorrectAmount(uint256 amountSent, uint256 amountRequired);
+error InvalidId(uint256 id);
+error CannotTallyPool();
+error NoWinningTickets();
+error CannotSkimPool();
+error CannotSpinTheWheel();
+error InsufficientBalance();
+error CannotCreateNewPool();
+error RequestAlreadyFulfilled();
+
 contract ZodiakLottery is VRFConsumerBaseV2Plus {
     ZodiakNFT public immutable ZDK; //ZodiakNFT contract
     address immutable COSMIC_VAULT; //The holder of money for easier accountability.
@@ -41,7 +51,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     mapping(uint256 requestID => RequestVRF request) public requests;
     mapping(address => mapping(uint256 => uint256[5])) public userWinningTickets; // 0 = 1st prize, 1 = 2nd prize, 2 = 3rd prize, 3 = 4th prize, 4 = 5th prize
 
-//CHECK: use packing
+    //CHECK: use packing
     struct Pool {
         uint256 startTimestamp;
         uint256 endTimestamp;
@@ -49,7 +59,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         uint256 remainingPot;
         uint256 numberOfWinningTickets;
         uint256 tier1; //total amount for 1 winner
-        uint256 tier2; 
+        uint256 tier2;
         uint256 tier3;
         uint256 tier4; //total amount to be shared among prize winners
         uint256 tier5;
@@ -76,55 +86,48 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     uint16 requestConfirmations = 3;
     uint32 numWords = 1;
 
-
     event Testing(uint256 num1, uint256 num2);
 
-    constructor(address _theMighty, address _cosmicVault)
-        VRFConsumerBaseV2Plus(SEPOLIA_VRF_COORDINATOR)
-    {
+    constructor(address _theMighty, address _cosmicVault) VRFConsumerBaseV2Plus(SEPOLIA_VRF_COORDINATOR) {
         COSMIC_VAULT = _cosmicVault;
         COORDINATOR = IVRFCoordinatorV2Plus(SEPOLIA_VRF_COORDINATOR);
-        lotteryPools.push(
-            Pool(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [uint256(0), 0, 0, 0, 0],[uint256(0), 0] ,0)
-        );
+        lotteryPools.push(Pool(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [uint256(0), 0, 0, 0, 0], [uint256(0), 0], 0));
         ZDK = new ZodiakNFT("https://zodiaknft.com/", _theMighty);
     }
 
     function createTicket(uint256 _amount) external payable {
-        require(msg.value >= 0.01 ether * _amount, "Incorrect amount");
+        if (msg.value < 0.01 ether * _amount) {
+            revert IncorrectAmount(msg.value, 0.01 ether * _amount);
+        }
         ZDK.createTicket(_amount, msg.sender);
     }
 
-
     /**
      * @dev tally the pool and do rewards accounting
-    */
+     */
     function tallyPool() external {
         Pool memory currentPoolM = lotteryPools[lotteryPools.length - 1];
         Pool storage currentPoolS = lotteryPools[lotteryPools.length - 1];
+
+        //errors
+        if (block.timestamp < currentPoolM.endTimestamp) {
+            revert CannotTallyPool();
+        }
+        if (currentPoolM.numberOfWinningTickets == 0) {
+            revert CannotTallyPool();
+        }
 
         // calculate and transfer fees for the house before distributing the pot
         uint256 fees = (currentPoolM.pot * 10) / 100;
 
         currentPoolS.pot = currentPoolM.pot = currentPoolM.pot - fees;
-
-        require(
-            block.timestamp > currentPoolM.endTimestamp,
-            "Cannot tally pool yet"
-        );
-        require(currentPoolM.numberOfWinningTickets > 0, "No winning tickets");
         currentPoolS.tier1 = (currentPoolM.pot * 25) / 100;
         currentPoolS.tier2 = (currentPoolM.pot * 10) / 100;
         currentPoolS.tier3 = (currentPoolM.pot * 5) / 100;
         currentPoolS.tier4 = (currentPoolM.pot * 20) / 100;
         currentPoolS.tier5 = (currentPoolM.pot * 40) / 100;
-        currentPoolS.winningTicketsRemaining = [
-            1,
-            1,
-            1,
-            currentPoolM.totalPrizeTickets_4_5[0],
-            currentPoolM.totalPrizeTickets_4_5[1]
-        ];
+        currentPoolS.winningTicketsRemaining =
+            [1, 1, 1, currentPoolM.totalPrizeTickets_4_5[0], currentPoolM.totalPrizeTickets_4_5[1]];
         //WARNING: cosmic vault not implemented , should have bookkeeping
         payable(COSMIC_VAULT).transfer(fees);
     }
@@ -134,34 +137,27 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
      * @dev skim the funds of a fully redeemed pool
      */
     function skimPool(uint256 _poolId) external {
-        require(
-            block.timestamp > lotteryPools[_poolId].endTimestamp,
-            "Cannot skim pool yet"
-        );
+        if (block.timestamp < lotteryPools[_poolId].endTimestamp) {
+            revert CannotSkimPool();
+        }
         //TODO: maybe instead of just transfering, it can be allocated (to a new pool? for other things?)
         payable(COSMIC_VAULT).transfer(lotteryPools[_poolId].remainingPot);
     }
-
-    
 
     /**
      * @dev triggers VRF callback that will launch the spin of the wheel
      * @param _zodiakChoice the zodiak booster of choice in case of loss
      */
     function launchSpin(uint256 _zodiakChoice) external {
-        require(
-            block.timestamp <
-                lotteryPools[lotteryPools.length - 1].endTimestamp,
-            "Cannot spin the wheel yet"
-        );
-        require(
-            ZDK.balanceOf(msg.sender, WHEEL_TICKET) >= 1,
-            "Insufficient balance"
-        );
-        require(
-            _zodiakChoice > 0 && _zodiakChoice < WINNING_TOKEN_ID,
-            "Invalid id"
-        );
+        if(block.timestamp > lotteryPools[lotteryPools.length - 1].endTimestamp){
+            revert CannotSpinTheWheel();
+        }
+        if (ZDK.balanceOf(msg.sender, WHEEL_TICKET) < 1) {
+            revert InsufficientBalance();
+        }
+        if (_zodiakChoice < 1 || _zodiakChoice >= WINNING_TOKEN_ID) {
+            revert InvalidId(_zodiakChoice);
+        }
 
         uint256 requestID = requestRandomWords();
 
@@ -170,35 +166,27 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         requests[requestID].requester = msg.sender;
     }
 
-
     /**
      * @dev for winning ticket holders to reveal their prize ticket
      * @dev triggers VRF for RNG callback, that will start the reveal of the prize ticket
      * @param _poolId the id of the pool to reveal the prize ticket from
      */
-    function launchReveal(uint256 _poolId)
-        external
-    {
-        require(
-            ZDK.balanceOf(msg.sender, WINNING_TOKEN_ID) > 0,
-            "Insufficient balance"
-        );
+    function launchReveal(uint256 _poolId) external {
+        if (ZDK.balanceOf(msg.sender, WINNING_TOKEN_ID) < 1) {
+            revert InsufficientBalance();
+        }
 
         uint256 requestID = requestRandomWords();
 
-        requests[requestID].poolId = _poolId; 
+        requests[requestID].poolId = _poolId;
         requests[requestID].requester = msg.sender;
-        
     }
 
     /**
      * @dev Request randomness
      * @return requestId The ID of the request sent to the VRF Coordinator
      */
-    function requestRandomWords()
-        public
-        returns (uint256 requestId)
-    {
+    function requestRandomWords() public returns (uint256 requestId) {
         // Will revert if subscription is not set and funded.
         // To enable payment in native tokens, set nativePayment to true.
         requestId = COORDINATOR.requestRandomWords(
@@ -208,9 +196,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
                 requestConfirmations: requestConfirmations,
                 callbackGasLimit: callbackGasLimit,
                 numWords: numWords,
-                extraArgs: VRFV2PlusClient._argsToBytes(
-                    VRFV2PlusClient.ExtraArgsV1({nativePayment: false})
-                )
+                extraArgs: VRFV2PlusClient._argsToBytes(VRFV2PlusClient.ExtraArgsV1({nativePayment: false}))
             })
         );
     }
@@ -220,26 +206,22 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
      * @dev Create a new pool
      */
     function createPool() public {
-        require(
-            block.timestamp >
-                lotteryPools[lotteryPools.length - 1].endTimestamp,
-            "Cannot create new pool yet"
-        );
+        if (block.timestamp < lotteryPools[lotteryPools.length - 1].endTimestamp) {
+            revert CannotCreateNewPool();
+        }
         Pool memory newPool;
         newPool.startTimestamp = block.timestamp;
         newPool.endTimestamp = block.timestamp + 3 hours;
         lotteryPools.push(newPool);
     }
 
-
     /**
      * @dev Set the price of the wheel spinning ticket
      * @param _price the price of the NFT
-    */
+     */
     function setPrice(uint256 _price) public {
         ticketPrice = _price;
     }
-
 
     //Internal function called on VRF callback
     /**
@@ -249,7 +231,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
      * @param _owner the owner of the NFT
      * @return win true if the user wins, false if the user looses
      */
-    function spinTheWheel(uint256 _zodiakChoice, uint256 _randomWord, address _owner) internal returns(bool win){
+    function spinTheWheel(uint256 _zodiakChoice, uint256 _randomWord, address _owner) internal returns (bool win) {
         //When the wheel is spinned, the price of a ticket is added to the pot
         lotteryPools[lotteryPools.length - 1].pot += 0.01 ether;
 
@@ -282,7 +264,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
      * @param _randomWord the random number generated by the VRF
      * @return prizeTokenId the id of the prize token
      */
-    function revealPrize(uint256 _poolId, uint256 _randomWord, address _user) internal returns(uint256 prizeTokenId){
+    function revealPrize(uint256 _poolId, uint256 _randomWord, address _user) internal returns (uint256 prizeTokenId) {
         //get a random number between 0 and 100
         uint256 RNG = _randomWord % 101;
 
@@ -294,9 +276,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
             } else {
                 prizeTokenId = 15;
             }
-        } else if (
-            (RNG <= 20 && RNG > 10) || prizeTokenId == 15
-        ) {
+        } else if ((RNG <= 20 && RNG > 10) || prizeTokenId == 15) {
             if (lotteryPools[_poolId].winningTicketsRemaining[1] == 1) {
                 prizeTokenId = 15;
                 userWinningTickets[_user][lotteryPools.length - 1][1]++;
@@ -304,9 +284,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
             } else {
                 prizeTokenId = 16;
             }
-        } else if (
-            (RNG <= 30 && RNG > 20) || prizeTokenId == 16
-        ) {
+        } else if ((RNG <= 30 && RNG > 20) || prizeTokenId == 16) {
             if (lotteryPools[_poolId].winningTicketsRemaining[2] == 1) {
                 prizeTokenId = 16;
                 userWinningTickets[_user][lotteryPools.length - 1][2]++;
@@ -339,17 +317,17 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
 
     //CHAINLINK CALLBACK FUNCTION
     /**
-        * @dev Callback function used by VRF Coordinator
-        * @dev This function is called by the VRF Coordinator when a random result is ready to be consumed.
-        * @param requestId The ID of the request sent to the VRF Coordinator
-        * @param randomWords The random words sent by the VRF Coordinator
+     * @dev Callback function used by VRF Coordinator
+     * @dev This function is called by the VRF Coordinator when a random result is ready to be consumed.
+     * @param requestId The ID of the request sent to the VRF Coordinator
+     * @param randomWords The random words sent by the VRF Coordinator
      */
-    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
-        internal
-        override
-    {
+    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords) internal override {
         RequestVRF memory request = requests[requestId];
-        require(!request.fulfilled, "Request already fulfilled");
+        if(request.fulfilled){
+            revert RequestAlreadyFulfilled();
+        }
+        
         requests[requestId].fulfilled = true;
 
         if (request.isSpin) {
@@ -357,9 +335,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         } else {
             revealPrize(request.poolId, randomWords[0], request.requester);
         }
-        
     }
-
 }
 
 /**
