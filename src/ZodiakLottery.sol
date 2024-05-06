@@ -47,9 +47,10 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     uint256 constant WHEEL_TICKET = 0; //the id of the wheel ticket
     uint256 constant WINNING_TOKEN_ID = 13; //the id of the winning undisclosed token
     uint256 ticketPrice = 0.01 ether;
-    Pool[] public lotteryPools;
+    Pool[] public lotteryPools; //WARNING: problem  between array or mapping?
     mapping(uint256 requestID => RequestVRF request) public requests;
-    mapping(address => mapping(uint256 => uint256[5])) public userWinningTickets; // 0 = 1st prize, 1 = 2nd prize, 2 = 3rd prize, 3 = 4th prize, 4 = 5th prize
+    mapping(address user => mapping(uint256 poolId => uint256[5] prizeTicketsCount)) public userPrizeTickets; // 0 = 1st prize, 1 = 2nd prize, 2 = 3rd prize, 3 = 4th prize, 4 = 5th prize
+    mapping(address user => mapping(uint256 poolId => uint256 winningTicketsCount) public userWinningTicketsCount; //total number of prize tickets
 
     //CHECK: use packing
     struct Pool {
@@ -233,6 +234,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
      */
     function spinTheWheel(uint256 _zodiakChoice, uint256 _randomWord, address _owner) internal returns (bool win) {
         //When the wheel is spinned, the price of a ticket is added to the pot
+        //TODO: cache lottery pool Id
         lotteryPools[lotteryPools.length - 1].pot += 0.01 ether;
 
         //get a random number between 0 and 100
@@ -243,6 +245,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
             //make sure the number of winning tickets of a the current pool is accounted for
             lotteryPools[lotteryPools.length - 1].numberOfWinningTickets++;
             lotteryPools[lotteryPools.length - 1].unusedPrizeTickets++;
+            winningTicketsCount[_owner][lotteryPools.length - 1]++;
             win = true;
 
             // win: mutate the token into winning ticket
@@ -271,7 +274,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         if (RNG <= 10) {
             if (lotteryPools[_poolId].winningTicketsRemaining[0] == 1) {
                 prizeTokenId = 14;
-                userWinningTickets[_user][lotteryPools.length - 1][0]++;
+                userPrizeTickets[_user][lotteryPools.length - 1][0]++;
                 lotteryPools[_poolId].winningTicketsRemaining[0]--;
             } else {
                 prizeTokenId = 15;
@@ -279,7 +282,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         } else if ((RNG <= 20 && RNG > 10) || prizeTokenId == 15) {
             if (lotteryPools[_poolId].winningTicketsRemaining[1] == 1) {
                 prizeTokenId = 15;
-                userWinningTickets[_user][lotteryPools.length - 1][1]++;
+                userPrizeTickets[_user][lotteryPools.length - 1][1]++;
                 lotteryPools[_poolId].winningTicketsRemaining[1]--;
             } else {
                 prizeTokenId = 16;
@@ -287,7 +290,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         } else if ((RNG <= 30 && RNG > 20) || prizeTokenId == 16) {
             if (lotteryPools[_poolId].winningTicketsRemaining[2] == 1) {
                 prizeTokenId = 16;
-                userWinningTickets[_user][lotteryPools.length - 1][2]++;
+                userPrizeTickets[_user][lotteryPools.length - 1][2]++;
                 lotteryPools[_poolId].winningTicketsRemaining[2]--;
             } else {
                 prizeTokenId = 17;
@@ -295,7 +298,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         } else if (RNG <= 60 && RNG > 30) {
             if (lotteryPools[_poolId].winningTicketsRemaining[3] > 0) {
                 prizeTokenId = 17;
-                userWinningTickets[_user][lotteryPools.length - 1][3]++;
+                userPrizeTickets[_user][lotteryPools.length - 1][3]++;
                 lotteryPools[_poolId].winningTicketsRemaining[3]--;
                 lotteryPools[_poolId].totalPrizeTickets_4_5[0]++;
             } else {
@@ -304,7 +307,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         } else if (RNG > 60 || prizeTokenId == 18) {
             if (lotteryPools[_poolId].winningTicketsRemaining[3] > 0) {
                 prizeTokenId = 18;
-                userWinningTickets[_user][lotteryPools.length - 1][4]++;
+                userPrizeTickets[_user][lotteryPools.length - 1][4]++;
                 lotteryPools[_poolId].winningTicketsRemaining[4]--;
                 lotteryPools[_poolId].totalPrizeTickets_4_5[1]++;
             } else {
