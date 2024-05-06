@@ -10,11 +10,10 @@ contract ZodiakNFT is ERC1155URIStorage {
     using Strings for uint256;
 
     // address immutable CosmicLottery;
-    address private theMighty;
-    address private theOracle;
-    uint256 private maxCollections = 19;
+    address private theMighty; // The creator and administrator of the contract
+    address private cosmicLottery; // The lottery contract
+    uint256 private maxCollections = 18;
     uint256 private maxZodiaks = 12;
-    uint256 price = 0.01 ether;
 
     struct Zodiak {
         uint16 strength;
@@ -29,7 +28,7 @@ contract ZodiakNFT is ERC1155URIStorage {
     // Only the CosmicLottery and theMighty can call this function
     modifier cosmicAuthority() {
         require(
-            msg.sender == theOracle ||
+            msg.sender == cosmicLottery ||
             msg.sender == theMighty, 
             "Only Cosmic powers can call this function"
             );
@@ -38,14 +37,14 @@ contract ZodiakNFT is ERC1155URIStorage {
 
     constructor(string memory _uri, address _theMighty) ERC1155(_uri) {
         theMighty = _theMighty;
+        cosmicLottery = msg.sender;
     }
 
     //CHECK: bookkeeping ?
     //astralBirth or summonLuck
-    function summonLuck(uint256 _amount) public payable {
-        require(msg.value >= price * _amount, "Incorrect amount");
-        require(balanceOf(msg.sender, 0) + _amount <= 10, "You can only mint 10 tokens");
-        _mint(msg.sender, 0, _amount, "");
+    function createTicket(uint256 _amount, address _summoner) public  cosmicAuthority() {
+        require(balanceOf(_summoner, 0) + _amount <= 10, "You can only mint 10 tokens");
+        _mint(_summoner, 0, _amount, "");
     }
 
     /**
@@ -56,7 +55,7 @@ contract ZodiakNFT is ERC1155URIStorage {
      */
     function cosmicMutation(uint256 _idFrom, uint256 _idTo, address _owner) public cosmicAuthority(){
         require(balanceOf(_owner, _idFrom) >= 1, "Insufficient balance");
-        require(_idFrom < maxCollections && _idTo < maxCollections, "Invalid id");
+        require(_idFrom <= maxCollections && _idTo <= maxCollections, "Invalid id");
         _burn(_owner, _idFrom, 1);
         _mint(_owner, _idTo, 1, "");
     }
@@ -94,13 +93,6 @@ contract ZodiakNFT is ERC1155URIStorage {
         }
     }
 
-    /**
-     * @dev Set the price of the wheel spinning ticket
-     * @param _price the price of the NFT
-     */
-    function setPrice(uint256 _price) public cosmicAuthority(){
-        price = _price;
-    }
 
     /**
      * @dev Set the max number of collections
