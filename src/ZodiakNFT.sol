@@ -11,7 +11,6 @@ contract ZodiakNFT is ERC1155URIStorage {
 
     // address immutable CosmicLottery;
     address private theMighty; // The creator and administrator of the contract
-    address private theOracle; // The contracts that renders Chainilink calls
     address private cosmicLottery; // The lottery contract
     uint256 private maxCollections = 18;
     uint256 private maxZodiaks = 12;
@@ -29,7 +28,6 @@ contract ZodiakNFT is ERC1155URIStorage {
     // Only the CosmicLottery and theMighty can call this function
     modifier cosmicAuthority() {
         require(
-            msg.sender == theOracle ||
             msg.sender == cosmicLottery ||
             msg.sender == theMighty, 
             "Only Cosmic powers can call this function"
