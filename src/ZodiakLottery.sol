@@ -61,6 +61,8 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         uint256 zodiakChoice;
         uint256 poolId;
         bool isSpin;
+        bool fulfilled;
+        address requester;
     }
 
     //CHAINLINK VARIABLES
@@ -68,12 +70,12 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     address constant SEPOLIA_VRF_COORDINATOR = 0x9DdfaCa8183c41ad55329BdeeD9F6A8d53168B1B;
     uint256 s_subscriptionId = 20406656112607748875103932091356574480957515311019163390203649607360869579051;
     bytes32 keyHash = 0x787d74caea10b2b357790d5b5247c2f63d1d91572a9846f780606e4d953677ae;
-    uint32 callbackGasLimit = 400000;
+    uint32 callbackGasLimit = 800000;
     uint16 requestConfirmations = 3;
     uint32 numWords = 1;
 
 
-    event Test(uint256 num1, uint256 num2);
+    event Testing(uint256 num1, uint256 num2);
 
     constructor(address _theMighty, address _cosmicVault)
         VRFConsumerBaseV2Plus(SEPOLIA_VRF_COORDINATOR)
@@ -153,32 +155,34 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         );
 
         uint256 requestID = requestRandomWords();
-        emit Test(requestID, 0);
 
-        requests[requestID] = RequestVRF(_zodiakChoice, 0, true);
-       
+        requests[requestID].zodiakChoice = _zodiakChoice;
+        requests[requestID].isSpin = true;
+        requests[requestID].requester = msg.sender;
+
+        emit Testing(requestID, 0);
     }
 
-    function spinTheWheel(uint256 _zodiakChoice, uint256 _randomWord) internal returns(bool win){
+    function spinTheWheel(uint256 _zodiakChoice, uint256 _randomWord, address _owner) internal returns(bool win){
         //When the wheel is spinned, the price of a ticket is added to the pot
         lotteryPools[lotteryPools.length - 1].pot += 0.01 ether;
 
         //get a random number between 0 and 100
-        uint256 randomNumber = _randomWord % 101;
+        uint256 RNG = _randomWord % 101;
 
         //win or loose
-        if (randomNumber < 12) {
+        if (RNG < 12) {
             //make sure the number of winning tickets of a the current pool is accounted for
             lotteryPools[lotteryPools.length - 1].numberOfWinningTickets++;
             lotteryPools[lotteryPools.length - 1].unusedPrizeTickets++;
             win = true;
 
             // win: mutate the token into winning ticket
-            ZDK.cosmicMutation(WHEEL_TICKET, WINNING_TOKEN_ID, msg.sender);
+            ZDK.cosmicMutation(WHEEL_TICKET, WINNING_TOKEN_ID, _owner);
         } else {
             win = false;
             //lose: mutate the token into the zodiak booster of choice
-            ZDK.cosmicMutation(WHEEL_TICKET, _zodiakChoice, msg.sender);
+            ZDK.cosmicMutation(WHEEL_TICKET, _zodiakChoice, _owner);
         }
     }
 
@@ -201,16 +205,16 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
 
         uint256 requestID = requestRandomWords();
 
-        requests[requestID] = RequestVRF(0 ,_poolId, false);
+        requests[requestID].poolId = _poolId; 
         
     }
 
     function revealPrize(uint256 _poolId, uint256 _randomWord) internal returns(uint256 prizeTokenId){
 
         //get a random number between 0 and 100
-        uint256 randomNumber = _randomWord % 101;
+        uint256 RNG = _randomWord % 101;
 
-        if (randomNumber <= 10) {
+        if (RNG <= 10) {
             if (lotteryPools[_poolId].winningTicketsRemaining[0] == 1) {
                 prizeTokenId = 14;
                 userWinningTickets[msg.sender][lotteryPools.length - 1][0]++;
@@ -219,7 +223,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
                 prizeTokenId = 15;
             }
         } else if (
-            (randomNumber <= 20 && randomNumber > 10) || prizeTokenId == 15
+            (RNG <= 20 && RNG > 10) || prizeTokenId == 15
         ) {
             if (lotteryPools[_poolId].winningTicketsRemaining[1] == 1) {
                 prizeTokenId = 15;
@@ -229,7 +233,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
                 prizeTokenId = 16;
             }
         } else if (
-            (randomNumber <= 30 && randomNumber > 20) || prizeTokenId == 16
+            (RNG <= 30 && RNG > 20) || prizeTokenId == 16
         ) {
             if (lotteryPools[_poolId].winningTicketsRemaining[2] == 1) {
                 prizeTokenId = 16;
@@ -238,7 +242,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
             } else {
                 prizeTokenId = 17;
             }
-        } else if (randomNumber <= 60 && randomNumber > 30) {
+        } else if (RNG <= 60 && RNG > 30) {
             if (lotteryPools[_poolId].winningTicketsRemaining[3] > 0) {
                 prizeTokenId = 17;
                 userWinningTickets[msg.sender][lotteryPools.length - 1][3]++;
@@ -246,7 +250,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
             } else {
                 prizeTokenId = 18;
             }
-        } else if (randomNumber > 60 || prizeTokenId == 18) {
+        } else if (RNG > 60 || prizeTokenId == 18) {
             if (lotteryPools[_poolId].winningTicketsRemaining[3] > 0) {
                 prizeTokenId = 18;
                 userWinningTickets[msg.sender][lotteryPools.length - 1][4]++;
@@ -277,11 +281,14 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         internal
         override
     {
-        if (requests[requestId].isSpin) {
-            spinTheWheel(requests[requestId].zodiakChoice, randomWords[0]);
+        RequestVRF memory request = requests[requestId];
+        if (request.isSpin) {
+            spinTheWheel(request.zodiakChoice, randomWords[0], request.requester);
         } else {
-            revealPrize(requests[requestId].poolId, randomWords[0]);
+            revealPrize(request.poolId, randomWords[0]);
         }
+        requests[requestId].fulfilled = true;
+       emit Testing(requestId,randomWords[0]);
     }
 
     function requestRandomWords()
