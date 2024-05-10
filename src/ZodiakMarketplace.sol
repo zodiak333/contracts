@@ -6,16 +6,16 @@ import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 error InvalidId(uint256 id);
 
-
 /// @title Zodiak33 Marketplace
 /// @author Saad Igueninni
-/// @notice Listing/buying of ZodiakTickets U ( can be wining tickets 
+/// @notice Listing/buying of ZodiakTickets : 
 /// @dev All function calls are currently implemented without side effects
 
-contract ZodiakMarketplace is ERC1155Holder {
+contract ZodiakMarketplace is ERC1155Holder, ReentrancyGuard {
     using Counters for Counters.Counter;
 
     //Stats
@@ -23,38 +23,37 @@ contract ZodiakMarketplace is ERC1155Holder {
     Counters.Counter private _nbSoldCounter;
 
     address private theMighty; // The creator and administrator of the contract
-    
+
     IERC1155 private zodiakNFT; // ZodiakNFT contract address
     uint256 private cosmicCouncilFee = 250; //CosmicConcilFee --> To be discussed with the team
-    
+
     // Only theMighty can call this function
     modifier onlyTheMighty() {
         require(
-            msg.sender == theMighty, 
+            msg.sender == theMighty,
             "Only the mighty can call this function"
-            );
+        );
         _;
     }
 
+    struct ZodiakMarketItem {
+        uint256 listingTokenId; // sell order number
+        uint256 nftId;          // to check with @Scott
+        uint256 amount;         // amount to sell
+        uint256 price;          // Price per ticket/price of the group?
+        uint256 royalty;
+        // uint256 nbSellsCounter;// Counter to track number of sales but how to deal with amount...
+        address payable seller;
+        address payable owner;
+        bool sold;
+    }
+
+    mapping(uint256 => ZodiakMarketItem) private marketItem; //keep track of all listed ZodiakMarketItem indexed by an icremental id
 
     constructor(address _zodiakNFT, address _theMighty) {
         zodiakNFT = IERC1155(_zodiakNFT);
         theMighty = _theMighty;
     }
-
-    struct ZodiakMarketItem {
-        uint256 listingTokenId;
-        uint256 nftId;  // to check with @Scott
-        uint256 amount; //not needed
-        uint256 price;
-        uint256 royalty;
-        address payable seller;
-        address payable owner;
-        bool sold;
-        bool winingTicket;
-    }
-
-    mapping(uint256 => ZodiakMarketItem) private marketItem; //keep track of all listed ZodiakMarketItem indexed by an icremental id
 
     /// @notice It will list the NFT to marketplace.
     /// @dev It will list NFT minted from MFTMint contract.
@@ -62,19 +61,18 @@ contract ZodiakMarketplace is ERC1155Holder {
         uint256 nftId,
         uint256 amount,
         uint256 price,
-        uint256 royalty,
-        bool winingTicket
+        uint256 royalty
     ) external {
-
-         if (nftId <= 0) {
+        if (nftId > 13) {
             revert InvalidId(nftId); //"Token does not exist"
         }
 
         require(royalty >= 0, "royalty should be between 0 to xxx"); //To be discussed with the team and then put as an Error
-        require(royalty < 299, "royalty should be less than xxx ");   //To be discussed with the team and then put as an Error
+        require(royalty < 299, "royalty should be less than xxx "); //To be discussed with the team and then put as an Error
 
         _nbListedCounter.increment();
         uint256 listingTokenId = _nbListedCounter.current();
+        // uint256 nbSellsCounter = 0;
 
         marketItem[listingTokenId] = ZodiakMarketItem(
             listingTokenId,
@@ -82,64 +80,76 @@ contract ZodiakMarketplace is ERC1155Holder {
             amount,
             price,
             royalty,
+            //   nbSellsCounter,
             payable(msg.sender),
             payable(msg.sender),
-            false,
-            winingTicket
-
+            false
         );
 
-        IERC1155(zodiakNFT).safeTransferFrom(
-            msg.sender,
-            address(this),
-            nftId,
-            amount, //  is the amount needed?
-            ""
-        );
+
+        // TODO --> Emit event 'Listed'
     }
 
     /// @notice  Buy the NFT from marketplace.
-    /// @dev User will able to buy NFT and transfer to respectively owner or user and platform fees, 
-    /// royalty fees also deducted 
+    /// @dev User will able to buy NFT and transfer to respectively owner or user and platform fees,
+    /// royalty fees also deducted
 
-    function buyNFT(uint256 tokenId, uint256 amount) external payable {
-        uint256 price = marketItem[tokenId].price;
-        uint256 royaltyFee = (price * marketItem[tokenId].royalty) / 10000;
+    function buyNFT(uint256 listingTokenId) external payable nonReentrant {
+
+        require(
+            msg.value == marketItem[listingTokenId].price,
+            "Not enough money to buy"
+        );
+
+        uint256 price = marketItem[listingTokenId].price;
+        uint256 royaltyFee = (price * marketItem[listingTokenId].royalty) / 10000;
         uint256 zodiacMarketFee = (price * cosmicCouncilFee) / 10000;
+        uint256 amountToSendToSeller = price - royaltyFee - zodiacMarketFee;
 
-        zodiakNFT.safeTransferFrom(msg.sender, address(this), 0, price, "");
-        zodiakNFT.safeTransferFrom(
-            msg.sender,
-            marketItem[tokenId].owner,
-            0,
-            royaltyFee,
-            ""
-        );
-        zodiakNFT.safeTransferFrom(
-            msg.sender,
-            address(this),
-            0,
-            zodiacMarketFee,
-            ""
-        );
-
-        marketItem[tokenId].owner = payable(msg.sender);
+        // Update marketItem array
+        marketItem[listingTokenId].sold = true;
+        marketItem[listingTokenId].owner = payable(msg.sender);
         _nbSoldCounter.increment();
 
-        onERC1155Received(address(this), msg.sender, tokenId, amount, "");
+        //Transfer ERC1155 tickets to buyer
+        zodiakNFT.safeTransferFrom(
+            marketItem[listingTokenId].owner,
+            msg.sender,
+            marketItem[listingTokenId].nftId,
+            marketItem[listingTokenId].amount,
+            ""
+        );
 
-        zodiakNFT.safeTransferFrom(address(this), msg.sender, tokenId, 1, "");
+        // TODO -->  calculate Royalties
+        // check if resale then pay royalties? only to first seller? or 1 time to last seller?
+        //Transfer cosmicCouncilFee to where? this contract? another global wallet?
+        //Transfer royalties to who?       
+
+        // TODO -->  calculate cosmicCouncilFee 
+        //Transfer cosmicCouncilFee to where? this contract? another global wallet?
+
+
+        // TODO -->  send money to seller --> amountToSendToSeller
+
+
+        // TODO -->  Emit event 'Buyed'
     }
 
-    /// @notice  CosmicCouncilFee getter 
+    function cancelSell(uint256 listingTokenId) external {
+        // emit ItemSellCanceled(listingTokenId,msg.sender);
+    }
+
+        function pauseSell(uint256 listingTokenId) external {
+        // emit ItemSellPaused(listingTokenId,msg.sender);
+    }
+
+    /// @notice  CosmicCouncilFee getter
     function setCosmicCouncilFee(uint256 _cosmicCouncilFee) public {
         cosmicCouncilFee = _cosmicCouncilFee;
     }
 
-
     /// @notice  CosmicCouncilFee setter
-    function getCosmicCouncilFee() onlyTheMighty public view returns  (uint256) {
+    function getCosmicCouncilFee() public view onlyTheMighty returns (uint256) {
         return cosmicCouncilFee;
     }
-
 }
