@@ -105,7 +105,8 @@ contract ZodiakMarketplace is ERC1155Holder, ReentrancyGuard {
 
         uint256 price = marketItem[listingTokenId].price;
         uint256 royaltyFee = (price * marketItem[listingTokenId].royalty) / 10000;
-        uint256 zodiacMarketFee = (price * cosmicCouncilFee) / 10000;
+        uint256 zodiacMarketFee = (price * cosmicCouncilFee) / 10000;//TODO --> depends on who receive the royaltyFee and if the logic? first sell no royalty fees, second to who and so on
+        // TODO --> if no royalties --> royaltyFee = 0
         uint256 amountToSendToSeller = price - royaltyFee - zodiacMarketFee;
 
         // Update marketItem array
