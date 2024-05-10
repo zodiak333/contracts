@@ -45,10 +45,11 @@ contract ZodiakMarketplace is ERC1155Holder, ReentrancyGuard {
         // uint256 nbSellsCounter;// Counter to track number of sales but how to deal with amount...
         address payable seller;
         address payable owner;
+        bool paused;
         bool sold;
     }
 
-    mapping(uint256 => ZodiakMarketItem) private marketItem; //keep track of all listed ZodiakMarketItem indexed by an icremental id
+    mapping(uint256 => ZodiakMarketItem) private marketItem; //keep track of all listed ZodiakMarketItem indexed by an icremental id ; mapping or array?
 
     constructor(address _zodiakNFT, address _theMighty) {
         zodiakNFT = IERC1155(_zodiakNFT);
@@ -83,6 +84,7 @@ contract ZodiakMarketplace is ERC1155Holder, ReentrancyGuard {
             //   nbSellsCounter,
             payable(msg.sender),
             payable(msg.sender),
+            false,
             false
         );
 
@@ -135,11 +137,19 @@ contract ZodiakMarketplace is ERC1155Holder, ReentrancyGuard {
         // TODO -->  Emit event 'Buyed'
     }
 
+    function fetchListedItems()  internal  {
+        // keep tracking in mapping or array to make it possibke to fetch?
+         // TODO -->  loop excluding Paused and sold ones
+       
+    }
+
     function cancelSell(uint256 listingTokenId) external {
+        marketItem[listingTokenId].paused = true;
         // emit ItemSellCanceled(listingTokenId,msg.sender);
     }
 
         function pauseSell(uint256 listingTokenId) external {
+            // TODO -->  pause sell by updating 'Paused' attribute
         // emit ItemSellPaused(listingTokenId,msg.sender);
     }
 
