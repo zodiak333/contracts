@@ -130,10 +130,15 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     }
 
     //FUNCTION FOR TESTING AND BUILDING
-    function helperWinTickets(uint256 _poolId, uint256 _amount, address _to) external {
-        lotteryPools[_poolId].numberOfWinningTickets++;
+    function helperWinTickets(uint256 _poolId, uint256 _amount, address _to) external payable {
+        if (msg.value < 0.01 ether * _amount) {
+            revert IncorrectAmount(msg.value, 0.01 ether * _amount);
+        }
+            lotteryPools[_poolId].numberOfWinningTickets++;
             lotteryPools[_poolId].unusedPrizeTickets++;
             userWinningTicketsCount[_to][_poolId] += _amount;
+            lotteryPools[_poolId].pot += msg.value;
+            ZDK.createTicket(_amount, msg.sender);
     }
 
     function createTicket(uint256 _amount) external payable {
@@ -163,10 +168,11 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         uint256 fees = (currentPoolM.pot * 10) / 100;
 
         //calculate the number of tickets for prize 4 and 5
+        // takes 30% and 70% of the winning tickets ( minus the 3 tickets for prize1,2,3) and add 3 in case prize 1,2,3 not won.
         uint256 prize4NumOfTickets = ((currentPoolM.numberOfWinningTickets -
-            3) * 30) / 100;
+            3) * 30) / 100  + 1;
         uint256 prize5NumOfTickets = (currentPoolM.numberOfWinningTickets - 3) -
-            prize4NumOfTickets;
+            prize4NumOfTickets + 2;
 
         //take care of uneven distribution
         if (((currentPoolM.numberOfWinningTickets - 3) * 30) % 100 > 0) {
@@ -340,6 +346,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         uint256 RNG = _randomWord % 101;
 
         //win or loose
+        //CHECK for now 70% chance to win - only for development
         if (RNG < 70) {
             //make sure the number of winning tickets of a the current pool is accounted for
             currentPool.numberOfWinningTickets++;
