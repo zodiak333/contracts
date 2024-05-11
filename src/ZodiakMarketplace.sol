@@ -12,7 +12,7 @@ error invalidAmountToSell();
 error InvalidNFTId(uint256 id);
 error InvalidPrice();
 error InsufficientBalance(address seller, uint256 nftID);
-error marketPlaceNotApprovedForAll(); 
+error marketPlaceNotApprovedForAll();
 error notEnoughMoneySenrToBuyItem();
 
 /// @title Zodiak33 Marketplace
@@ -118,7 +118,7 @@ contract ZodiakMarketplace is  ReentrancyGuard {
             revert notEnoughMoneySenrToBuyItem();
         }
 
-        if (!zodiakNFT.isApprovedForAll(msg.sender, address(this))) {
+        if (!zodiakNFT.isApprovedForAll(idToMarketItem[listingTokenId].actualOwner, address(this))) {
             revert marketPlaceNotApprovedForAll();
         } //MarketPlace must be approved
 
