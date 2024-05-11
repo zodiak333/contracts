@@ -12,14 +12,14 @@ error invalidAmountToSell();
 error InvalidNFTId(uint256 id);
 error InvalidPrice();
 error InsufficientBalance(address seller, uint256 nftID);
-error marketPlaceNotApprovedForAll();
+error marketPlaceNotApprovedForAll(); 
 error notEnoughMoneySenrToBuyItem();
 
 /// @title Zodiak33 Marketplace
 /// @author Saad Igueninni
 /// @notice Listing/buying of ZodiakTickets :
 /// @dev All function calls are currently implemented without side effects
-contract ZodiakMarketplace is  ReentrancyGuard  {
+contract ZodiakMarketplace is  ReentrancyGuard {
     using Counters for Counters.Counter;
 
     event ItemListingCreated(ZodiakMarketItem zodiakMarketItem);
