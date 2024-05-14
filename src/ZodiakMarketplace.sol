@@ -14,16 +14,17 @@ error InvalidPrice();
 error InsufficientBalance(address seller, uint256 nftID);
 error marketPlaceNotApprovedForAll();
 error notEnoughMoneySenrToBuyItem();
+error notPausedLlistingTokenId(uint256 listingTokenId);
 
 /// @title Zodiak33 Marketplace
 /// @author Saad Igueninni
 /// @notice Listing/buying of ZodiakTickets :
-/// @dev All function calls are currently implemented without side effects
-contract ZodiakMarketplace is  ReentrancyGuard {
+contract ZodiakMarketplace is ReentrancyGuard {
     using Counters for Counters.Counter;
 
     event ItemListingCreated(ZodiakMarketItem zodiakMarketItem);
     event ItemSellPaused(uint256 indexed listingTokenId);
+    event ItemSellUnPaused(uint256 indexed listingTokenId);
     event ItemSellCanceled(uint256 indexed listingTokenId);
     event ItemSellTerminated(uint256 indexed listingTokenId);
 
@@ -49,10 +50,24 @@ contract ZodiakMarketplace is  ReentrancyGuard {
     mapping(uint256 => ZodiakMarketItem) public idToMarketItem; //keep track of all listed ZodiakMarketItem indexed by an icremental id
 
     // Only theMighty can call this function
-    modifier onlyTheMighty() {
+    modifier onlyTheMightyOrTheOwner(uint256 listingTokenId) {
         require(
-            msg.sender == theMighty,
+            msg.sender == theMighty ||
+                msg.sender == idToMarketItem[listingTokenId].actualOwner,
             "Only the mighty can call this function"
+        );
+        _;
+    }
+
+    // Only valid == sellable & exists
+    modifier validSellStatusListingTokenId(uint256 listingTokenId) {
+        require(
+            !idToMarketItem[listingTokenId].paused &&
+                !idToMarketItem[listingTokenId].sold &&
+                !idToMarketItem[listingTokenId].canceled &&
+                listingTokenId > 0 &&
+                listingTokenId <= _nbListedCounter.current(),
+            "ListingTokenId not on sell status on the marketPlace!"
         );
         _;
     }
@@ -106,6 +121,7 @@ contract ZodiakMarketplace is  ReentrancyGuard {
             payable(msg.sender),
             msg.sender,
             false,
+            false,
             false
         );
 
@@ -113,15 +129,27 @@ contract ZodiakMarketplace is  ReentrancyGuard {
     }
 
     /// @notice  Buy the NFT from marketplace.
-    /// @dev User will able to buy NFT and transfer to respectively owner or user
-    function buyNFT(uint256 listingTokenId) external payable nonReentrant {
+    /// @dev User will able to buy NFT and transfer to seller
+    function buyNFT(uint256 listingTokenId)
+        external
+        payable
+        nonReentrant
+        validSellStatusListingTokenId(listingTokenId)
+    {
         if (msg.value != idToMarketItem[listingTokenId].price) {
             revert notEnoughMoneySenrToBuyItem();
         }
 
-        if (!zodiakNFT.isApprovedForAll(idToMarketItem[listingTokenId].actualOwner, address(this))) {
+        if (
+            !zodiakNFT.isApprovedForAll(
+                idToMarketItem[listingTokenId].actualOwner,
+                address(this)
+            )
+        ) {
             revert marketPlaceNotApprovedForAll();
         } //MarketPlace must be approved
+
+        // What happens if seller hans no more enough tokens between listing and sell?
 
         // Update marketItem array
         idToMarketItem[listingTokenId].sold = true;
@@ -138,17 +166,36 @@ contract ZodiakMarketplace is  ReentrancyGuard {
         );
 
         //Transfer money to seller
-        payable(idToMarketItem[listingTokenId].seller).transfer(
-            idToMarketItem[listingTokenId].price
-        );
+        (bool sent, ) = idToMarketItem[listingTokenId].seller.call{
+            value: idToMarketItem[listingTokenId].price
+        }("");
+        require(sent, "Failed to send Ether");
 
         emit ItemSellTerminated(listingTokenId);
     }
 
-    function fetchMyItems() external view returns (ZodiakMarketItem[] memory) {
-        //TODO check msg.sender is actual owner and not paused and not sold
+    /// @notice  Fetch my items
+    /// @dev User will able to fetch all his items ina ll status : sold, paused , canceled...
+    function fetchMyItems() public view returns (ZodiakMarketItem[] memory) {
+        uint256 itemsCount = _nbListedCounter.current();
+        ZodiakMarketItem[] memory myItems = new ZodiakMarketItem[](itemsCount);
+        uint256 currentIndex = 0;
+
+        for (uint256 i = 0; i < itemsCount; i++) {
+            uint256 currentId = i + 1;
+            ZodiakMarketItem storage currentItem = idToMarketItem[currentId];
+            //exclude sold and paused items
+            if (currentItem.actualOwner != msg.sender) {
+                myItems[currentIndex] = currentItem;
+            }
+            currentIndex += 1;
+        }
+        //the array 'tokens' has the list of all NFTs in the marketplace
+        return myItems;
     }
 
+    /// @notice  Fetch all Listed
+    /// @dev User will able to fetch items that are on sell
     function fetchListedItems()
         public
         view
@@ -164,7 +211,11 @@ contract ZodiakMarketplace is  ReentrancyGuard {
             uint256 currentId = i + 1;
             ZodiakMarketItem storage currentItem = idToMarketItem[currentId];
             //exclude sold and paused items
-            if (!currentItem.paused && !currentItem.sold) {
+            if (
+                !currentItem.paused &&
+                !currentItem.sold &&
+                !currentItem.canceled
+            ) {
                 listedItems[currentIndex] = currentItem;
             }
             currentIndex += 1;
@@ -173,19 +224,48 @@ contract ZodiakMarketplace is  ReentrancyGuard {
         return listedItems;
     }
 
-    function cancelSell(uint256 listingTokenId) external {
+    /// @notice  Cancel sell
+    /// @dev User will able to cancel a sell
+    function cancelSell(uint256 listingTokenId)
+        external
+        onlyTheMightyOrTheOwner(listingTokenId)
+        validSellStatusListingTokenId(listingTokenId)
+    {
         emit ItemSellCanceled(listingTokenId);
     }
 
-    function pauseSell(uint256 listingTokenId) external {
+    /// @notice  pause sell
+    /// @dev User will able to pause a listing/sell
+    function pauseSell(uint256 listingTokenId)
+        external
+        onlyTheMightyOrTheOwner(listingTokenId)
+        validSellStatusListingTokenId(listingTokenId)
+    {
         idToMarketItem[listingTokenId].paused = true;
         emit ItemSellPaused(listingTokenId);
     }
 
-
-    function onERC1155Received(address, address, uint256, uint256, bytes memory) public virtual returns (bytes4) {
-        return this.onERC1155Received.selector;
+    /// @notice  unpause sell
+    /// @dev User will able to unpause a listing/sell
+    function unPauseSell(uint256 listingTokenId)
+        external
+        onlyTheMightyOrTheOwner(listingTokenId)
+    {
+        if (!idToMarketItem[listingTokenId].paused) {
+            revert notPausedLlistingTokenId(listingTokenId);
+        }
+        idToMarketItem[listingTokenId].paused = true;
+        emit ItemSellUnPaused(listingTokenId);
     }
+    
 
-
+    /*     function onERC1155Received(
+        address,
+        address,
+        uint256,
+        uint256,
+        bytes memory
+    ) public virtual returns (bytes4) {
+        return this.onERC1155Received.selector;
+    } */
 }
