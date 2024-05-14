@@ -41,6 +41,7 @@ contract ZodiakMarketplace is  ReentrancyGuard {
         uint256 price; // Price of the lot
         address payable seller;
         address actualOwner; // seller is owner until buy, then buyer is owner
+        bool canceled;
         bool paused;
         bool sold;
     }
