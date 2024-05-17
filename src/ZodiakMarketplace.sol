@@ -20,7 +20,7 @@ error notPausedLlistingTokenId(uint256 listingTokenId);
 /// @author Saad Igueninni
 /// @notice Listing/buying of ZodiakTickets :
 contract ZodiakMarketplace is ReentrancyGuard {
-    using Counters for Counters.Counter;
+    using Counters for Counters.Counter;  //TODO: counter is not needed after 0.8
 
     event ItemListingCreated(ZodiakMarketItem zodiakMarketItem);
     event ItemSellPaused(uint256 indexed listingTokenId);
@@ -41,7 +41,7 @@ contract ZodiakMarketplace is ReentrancyGuard {
         uint256[] amounts;
         uint256 price; // Price of the lot
         address payable seller;
-        address actualOwner; // seller is owner until buy, then buyer is owner
+        address actualOwner; // seller is owner until buy, then buyer is owner //TODO:maybe just call it buyer ?
         bool canceled;
         bool paused;
         bool sold;
