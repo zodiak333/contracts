@@ -3,9 +3,8 @@
 pragma solidity 0.8.25;
 
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 error nftsCountMismatchAmounts();
 error invalidAmountToSell();
@@ -20,7 +19,6 @@ error notPausedLlistingTokenId(uint256 listingTokenId);
 /// @author Saad Igueninni
 /// @notice Listing/buying of ZodiakTickets :
 contract ZodiakMarketplace is ReentrancyGuard {
-    using Counters for Counters.Counter;  //TODO: counter is not needed after 0.8
 
     event ItemListingCreated(ZodiakMarketItem zodiakMarketItem);
     event ItemSellPaused(uint256 indexed listingTokenId);
@@ -28,11 +26,9 @@ contract ZodiakMarketplace is ReentrancyGuard {
     event ItemSellCanceled(uint256 indexed listingTokenId);
     event ItemSellTerminated(uint256 indexed listingTokenId);
 
-    //Stats
-    Counters.Counter private _nbListedCounter;
-    Counters.Counter private _nbSoldCounter;
 
     address private theMighty; // The creator and administrator of the contract
+    uint256 public listingCount;
 
     IERC1155 public immutable zodiakNFT; // ZodiakNFT contract address
 
@@ -66,7 +62,7 @@ contract ZodiakMarketplace is ReentrancyGuard {
                 !idToMarketItem[listingTokenId].sold &&
                 !idToMarketItem[listingTokenId].canceled &&
                 listingTokenId > 0 &&
-                listingTokenId <= _nbListedCounter.current(),
+                listingTokenId <= listingCount,
             "ListingTokenId not on sell status on the marketPlace!"
         );
         _;
@@ -111,8 +107,8 @@ contract ZodiakMarketplace is ReentrancyGuard {
             revert InvalidPrice();
         } //Should not be negative
 
-        _nbListedCounter.increment(); // as of OZ, we cannot overflow uint so Unchecked incremental
-        uint256 listingTokenId = _nbListedCounter.current();
+        listingCount++; // as of OZ, we cannot overflow uint so Unchecked incremental
+        uint256 listingTokenId = listingCount;
 
         idToMarketItem[listingTokenId] = ZodiakMarketItem(
             nftIds,
@@ -154,7 +150,7 @@ contract ZodiakMarketplace is ReentrancyGuard {
         // Update marketItem array
         idToMarketItem[listingTokenId].sold = true;
         idToMarketItem[listingTokenId].actualOwner = msg.sender;
-        _nbSoldCounter.increment();
+        listingCount++;
 
         //Transfer ERC1155 tickets to buyer
         zodiakNFT.safeBatchTransferFrom( //(from, to, ids, amounts, data)(
@@ -177,7 +173,7 @@ contract ZodiakMarketplace is ReentrancyGuard {
     /// @notice  Fetch my items
     /// @dev User will able to fetch all his items ina ll status : sold, paused , canceled...
     function fetchMyItems() public view returns (ZodiakMarketItem[] memory) {
-        uint256 itemsCount = _nbListedCounter.current();
+        uint256 itemsCount = listingCount;
         ZodiakMarketItem[] memory myItems = new ZodiakMarketItem[](itemsCount);
         uint256 currentIndex = 0;
 
@@ -201,7 +197,7 @@ contract ZodiakMarketplace is ReentrancyGuard {
         view
         returns (ZodiakMarketItem[] memory)
     {
-        uint256 itemsCount = _nbListedCounter.current();
+        uint256 itemsCount = listingCount;
         ZodiakMarketItem[] memory listedItems = new ZodiakMarketItem[](
             itemsCount
         );
