@@ -8,8 +8,7 @@ contract LotteryTest is Test {
     ZodiakLottery public lottery;
 
     function setUp() public {
-        lottery = new ZodiakLottery(address(0), address(0));
-        
+        lottery = new ZodiakLottery(address(0), address(0), "");
     }
 
     // function test_Increment() public {

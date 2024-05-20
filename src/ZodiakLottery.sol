@@ -172,6 +172,9 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     // emit a {RequestFulfilled} event when a VRF request is fulfilled
     event RequestFulfilled(uint256 indexed requestId, uint256[] randomWords);
 
+    // emit a {PoolCreated} event when a new pool is created
+    event PoolCreated(uint256 indexed poolId);
+
     // Restriction for functions calls. theOverseer = automation contract, theMighty = EOA admin
     modifier cosmicAuthority() {
         require(msg.sender == theOverseer || msg.sender == theMighty, "Only Cosmic powers can call this function");
@@ -363,11 +366,13 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     /**
      * @dev Create a new pool
      */
-    function createPool() public cosmicAuthority {
+    function createPool() public cosmicAuthority returns (uint256) {
         Pool memory newPool;
         newPool.startTimestamp = block.timestamp;
         newPool.endTimestamp = block.timestamp + 1200; //hardcoded to be 20 minutes
         lotteryPools.push(newPool);
+        emit PoolCreated(lotteryPools.length - 1);
+        return lotteryPools.length - 1;
     }
 
     /**
