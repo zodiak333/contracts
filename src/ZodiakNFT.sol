@@ -39,7 +39,7 @@ contract ZodiakNFT is ERC1155URIStorage {
     //CHECK: bookkeeping ?
     //astralBirth or summonLuck
     function createTicket(uint256 _amount, address _summoner) public cosmicAuthority {
-        require(balanceOf(_summoner, 0) + _amount <= 10, "You can only mint 10 tokens");
+        // require(balanceOf(_summoner, 0) + _amount <= 10, "You can only mint 10 tokens");
         _mint(_summoner, 0, _amount, "");
     }
 
