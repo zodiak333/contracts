@@ -4,7 +4,7 @@ pragma solidity 0.8.25;
 
 // enum ZodiakSign {
 //     WheelTicket(0)
-//     Aries(1),>
+//     Aries(1),
 //     Taurus(2),
 //     Gemini(3),
 //     Cancer(4),
@@ -23,6 +23,8 @@ pragma solidity 0.8.25;
 //     Prize4 (17),
 //     Prize5 (18),
 // }
+
+//WARNING: if the poolDuration is changed, the chainlink upkeep time will need to be updated
 
 import {ZodiakNFT} from "./ZodiakNFT.sol";
 import {IVRFCoordinatorV2Plus} from "@chainlink/contracts/src/v0.8/vrf/dev/interfaces/IVRFCoordinatorV2Plus.sol";
@@ -52,15 +54,14 @@ error ClaimPeriodEnded();
 
 error TransferFailed();
 
+error QueueIsEmpty();
+
 contract ZodiakLottery is VRFConsumerBaseV2Plus {
     //ZodiakNFT contract
     ZodiakNFT public immutable ZDK;
 
     //The holder of money for easier accountability.
     CosmicVault public immutable COSMIC_VAULT;
-
-    //The ChainLink automated overseer
-    address public theOverseer;
 
     //The creator and administrator of the contract
     address public theMighty;
@@ -75,10 +76,18 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
 
     uint256 reserve;
 
-    uint256 public poolDuration = 1200; //hardcoded to be 20 minutes
+    uint256 public allPoolDuration = 600;     // 8 * 1 hours; //hardcoded to be 8 hours
+
+    uint256 public claimPeriodDuration = 600; // 24 * 1 hours; //hardcoded to be 24 hours
 
     // all the pools
     Pool[] public lotteryPools;
+
+    uint256[] public playingQueue;
+
+    uint256[] public claimingQueue;
+
+    mapping(address _account => bool isOverseer) public isOverseer;
 
     // All requests sent to the VRF Coordinator and fulfilled
     mapping(uint256 requestId => RequestVRF request) public requests;
@@ -87,7 +96,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     mapping(address user => mapping(uint256 pool => uint256 numOfWin)) public userWinningTicketsCount; //total number of prize tickets
     //CHECK: track user gains per pool ?
 
-    //CHECK: use packing
+    //CHECK: use packing (starttimestamp + endtimestamp + numOfPlays + numOfWinners + unusedPrizeTickets) ?
     /**
      * @dev A pool is a period of time where users can buy tickets and win prizes
      * @param startTimestamp the start of the pool
@@ -103,8 +112,10 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
      * @param distributed true if the pool is distributed. Once closed, prizes can no longer be claimed. The remaining pot can be skimmed.
      */
     struct Pool {
+        uint256 poolId;
         uint256 startTimestamp;
         uint256 endTimestamp;
+        uint256 numOfPlays;
         uint256 pot;
         uint256 remainingPot;
         uint256 numberOfWinningTickets;
@@ -150,7 +161,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     bytes32 keyHash = 0x787d74caea10b2b357790d5b5247c2f63d1d91572a9846f780606e4d953677ae;
 
     // max allowed gas for the VRF callback
-    uint32 callbackGasLimit = 400000;
+    uint32 callbackGasLimit = 1_000_000;
 
     // number of confirmations required for the VRF request
     uint16 requestConfirmations = 3;
@@ -169,7 +180,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     event LotteryTicketCreated(address indexed user, uint256 amount);
 
     // emit a {WheelSpinned} event when a user spins the wheel
-    event WheelSpinned(uint256 indexed poolId, address indexed user, bool indexed win, uint256 zodiakChoice);
+    event WheelSpinned(uint256 indexed poolId, address indexed user, bool indexed win, uint256 zodiakChoice, uint256 _numOfWin, uint256 _numofPlayers);
 
     // emit a {RequestFulfilled} event when a VRF request is fulfilled
     event RequestFulfilled(uint256 indexed requestId, uint256[] randomWords);
@@ -179,21 +190,21 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
 
     // Restriction for functions calls. theOverseer = automation contract, theMighty = EOA admin
     modifier cosmicAuthority() {
-        require(msg.sender == theOverseer || msg.sender == theMighty, "Only Cosmic powers can call this function");
+        require(isOverseer[msg.sender] || msg.sender == theMighty || msg.sender == address(this), "Only Cosmic powers can call this function");
         _;
     }
 
-    constructor(address _theMighty, address _overseer, string memory _URI)
+    constructor(address _theMighty, string memory _URI)
         VRFConsumerBaseV2Plus(SEPOLIA_VRF_COORDINATOR)
     {
         COSMIC_VAULT = new CosmicVault();
         COORDINATOR = IVRFCoordinatorV2Plus(SEPOLIA_VRF_COORDINATOR);
         lotteryPools.push(
-            Pool(0, 0, 0, 0, 0, [uint256(0), 0, 0, 0, 0], [uint256(0), 0, 0, 0, 0], [uint256(0), 0], 0, false, false)
+            Pool(0 ,0, 0, 0, 0, 0, 0, [uint256(0), 0, 0, 0, 0], [uint256(0), 0, 0, 0, 0], [uint256(0), 0], 0, false, false)
         );
         ZDK = new ZodiakNFT(_URI, _theMighty);
         theMighty = _theMighty;
-        theOverseer = _overseer;
+        
     }
 
     //=====================================================================================
@@ -202,8 +213,14 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     //
     //=====================================================================================
 
-    function setTheOverseer(address _overseer) external cosmicAuthority {
-        theOverseer = _overseer;
+    function setOverseer(address _overseer) external cosmicAuthority {
+        isOverseer[_overseer] = true;
+    }
+
+    function removeOverseer(address[] calldata _overseers) public {
+        for(uint256 i = 0; i < _overseers.length; i++){
+            isOverseer[_overseers[i]] = false;
+        }
     }
 
     function setTheMighty(address _mighty) external cosmicAuthority {
@@ -225,9 +242,6 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         ZDK.createTicket(_amount, msg.sender);
     }
 
-    function closePool(uint256 _poolId) external cosmicAuthority {
-        lotteryPools[_poolId].distributed = true;
-    }
 
     function extendPoolDuration(uint256 _poolId, uint256 _time) external cosmicAuthority {
         lotteryPools[_poolId].endTimestamp += _time;
@@ -255,68 +269,32 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         ZDK.createTicket(_amount, msg.sender);
     }
 
-    //TODO: verify verify veryf test. Watch precision, float points, underflow/overflow ...
-    /**
-     * @dev tally the pool and do rewards accounting
-     */
-    function tallyPool(uint256 _poolId) external {
-        Pool memory currentPoolM = lotteryPools[_poolId];
-        Pool storage currentPoolS = lotteryPools[_poolId];
+    
 
-        //TODO: not used for testing and building
-        //if (block.timestamp < currentPoolM.endTimestamp) {
-        //    revert CannotTallyPool();
-        //}
-        if (currentPoolM.numberOfWinningTickets < 10) {
-            revert NoWinningTickets();
+    function modifyAllPoolDuration(uint256 _newDuration) external cosmicAuthority {
+        allPoolDuration = _newDuration;
+    }
+
+    function upkeepTallyPool() external cosmicAuthority {
+        if (playingQueue.length < 1) {
+            revert QueueIsEmpty();
         }
-        // calculate and transfer fees for the house before distributing the pot
-        uint256 fees = (currentPoolM.pot * 10) / 100;
-
-        //calculate the number of tickets for prize 4 and 5
-        // takes 30% and 70% of the winning tickets ( minus the 3 tickets for prize1,2,3) and add 3 in case prize 1,2,3 not won.
-        uint256 numOfTickets_4 = ((currentPoolM.numberOfWinningTickets - 3) * 30) / 100 + 1;
-        uint256 numOfTickets_5 = (currentPoolM.numberOfWinningTickets - 3) - numOfTickets_4 + 2;
-
-        //take care of uneven distribution
-        if (((currentPoolM.numberOfWinningTickets - 3) * 30) % 100 > 0) {
-            numOfTickets_5++;
-        }
-
-        if (numOfTickets_4 == 0 || numOfTickets_5 == 0) {
-            revert("Insufficient winning tickets to distribute prize 4 or 5.");
-        }
-
-        currentPoolS.pot = currentPoolM.pot = currentPoolM.pot - fees;
-        currentPoolS.remainingPot = currentPoolM.pot;
-        currentPoolS.tierPot[0] = (currentPoolM.pot * 25) / 100;
-        currentPoolS.tierPot[1] = (currentPoolM.pot * 10) / 100;
-        currentPoolS.tierPot[2] = (currentPoolM.pot * 5) / 100;
-        currentPoolS.tierPot[3] = (currentPoolM.pot * 20) / 100;
-        currentPoolS.tierPot[4] = (currentPoolM.pot * 40) / 100;
-        currentPoolS.winningTicketsRemaining = [1, 1, 1, numOfTickets_4, numOfTickets_5];
-        currentPoolS.prizeAmount_4_5 =
-            [currentPoolS.tierPot[3] / numOfTickets_4, currentPoolS.tierPot[4] / numOfTickets_5];
-        currentPoolS.unusedPrizeTickets = currentPoolM.numberOfWinningTickets;
-        currentPoolS.tallied = true;
-
-        emit PoolTallied(lotteryPools.length - 1, currentPoolM.pot, currentPoolM.numberOfWinningTickets);
-
-        (bool success,) = payable(address(COSMIC_VAULT)).call{value: fees}("");
-        if (!success) {
-            revert TransferFailed();
+        for(uint256 i = 0; i < playingQueue.length; i++) {
+            if (lotteryPools[playingQueue[i]].endTimestamp < block.timestamp && lotteryPools[playingQueue[i]].numberOfWinningTickets >= 10) {
+                tallyPool(playingQueue[i]);
+            }
         }
     }
 
-    /**
-     * @dev skim the funds of a fully redeemed pool
-     */
-    function skimPool(uint256 _poolId) external cosmicAuthority {
-        if (!lotteryPools[_poolId].distributed) {
-            revert CannotSkimPool();
+    function upkeepClosePool() external cosmicAuthority {
+        if (claimingQueue.length < 1) {
+            revert QueueIsEmpty();
         }
-        //TODO: maybe instead of just transfering, it can be allocated (to a new pool? for other things?)
-        payable(address(COSMIC_VAULT)).transfer(lotteryPools[_poolId].remainingPot);
+        for(uint256 i = 0; i < claimingQueue.length; i++) {
+            if (lotteryPools[claimingQueue[i]].tallied && lotteryPools[claimingQueue[i]].endTimestamp + claimPeriodDuration < block.timestamp) {
+                closePool(claimingQueue[i]);
+            }
+        }
     }
 
     /**
@@ -368,14 +346,101 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     //TODO change hardcoded time to dynamic variable
     /**
      * @dev Create a new pool
+     * @dev register to playing queues
+     * @return the id of the new pool
      */
     function createPool() public cosmicAuthority returns (uint256) {
         Pool memory newPool;
         newPool.startTimestamp = block.timestamp;
-        newPool.endTimestamp = block.timestamp + poolDuration; //hardcoded to be 20 minutes
+        newPool.endTimestamp = block.timestamp + allPoolDuration; //hardcoded to be 20 minutes
+        newPool.poolId = lotteryPools.length;
         lotteryPools.push(newPool);
-        emit PoolCreated(lotteryPools.length - 1, poolDuration);
+        playingQueue.push(newPool.poolId);
+        emit PoolCreated(lotteryPools.length - 1, allPoolDuration);
         return lotteryPools.length - 1;
+    }
+
+    //TODO: verify verify veryf test. Watch precision, float points, underflow/overflow ...
+    /**
+     * @dev tally the pool and do rewards accounting
+     */
+    function tallyPool(uint256 _poolId) public cosmicAuthority {
+        Pool memory currentPoolM = lotteryPools[_poolId];
+        Pool storage currentPoolS = lotteryPools[_poolId];
+
+        if (currentPoolM.numberOfWinningTickets < 10) {
+            revert NoWinningTickets();
+        }
+        // calculate and transfer fees for the house before distributing the pot
+        uint256 fees = (currentPoolM.pot * 10) / 100;
+
+        //calculate the number of tickets for prize 4 and 5
+        // takes 30% and 70% of the winning tickets ( minus the 3 tickets for prize1,2,3) and add 3 in case prize 1,2,3 not won.
+        uint256 numOfTickets_4 = ((currentPoolM.numberOfWinningTickets - 3) * 30) / 100 + 1;
+        uint256 numOfTickets_5 = (currentPoolM.numberOfWinningTickets - 3) - numOfTickets_4 + 2;
+
+        //take care of uneven distribution
+        if (((currentPoolM.numberOfWinningTickets - 3) * 30) % 100 > 0) {
+            numOfTickets_5++;
+        }
+
+        if (numOfTickets_4 == 0 || numOfTickets_5 == 0) {
+            revert("Insufficient winning tickets to distribute prize 4 or 5.");
+        }
+
+        currentPoolS.pot = currentPoolM.pot = currentPoolM.pot - fees;
+        currentPoolS.remainingPot = currentPoolM.pot;
+        currentPoolS.tierPot[0] = (currentPoolM.pot * 25) / 100;
+        currentPoolS.tierPot[1] = (currentPoolM.pot * 10) / 100;
+        currentPoolS.tierPot[2] = (currentPoolM.pot * 5) / 100;
+        currentPoolS.tierPot[3] = (currentPoolM.pot * 20) / 100;
+        currentPoolS.tierPot[4] = (currentPoolM.pot * 40) / 100;
+        currentPoolS.winningTicketsRemaining = [1, 1, 1, numOfTickets_4, numOfTickets_5];
+        currentPoolS.prizeAmount_4_5 =
+            [currentPoolS.tierPot[3] / numOfTickets_4, currentPoolS.tierPot[4] / numOfTickets_5];
+        currentPoolS.unusedPrizeTickets = currentPoolM.numberOfWinningTickets;
+        currentPoolS.tallied = true;
+
+        claimingQueue.push(currentPoolS.poolId);
+
+        //find and remove from playing queue
+        for(uint256 i = 0; i < playingQueue.length; i++) {
+            if (playingQueue[i] == _poolId) {
+                playingQueue[i] = playingQueue[playingQueue.length - 1];
+                playingQueue.pop();
+            }
+        }
+
+        emit PoolTallied(lotteryPools.length - 1, currentPoolM.pot, currentPoolM.numberOfWinningTickets);
+
+        (bool success,) = payable(address(COSMIC_VAULT)).call{value: fees}("");
+        if (!success) {
+            revert TransferFailed();
+        }
+    }
+
+    function closePool(uint256 _poolId) public cosmicAuthority {
+        lotteryPools[_poolId].distributed = true;
+        
+        //find pool and remove from claiming queue
+        for (uint256 i = 0; i < claimingQueue.length; i++) {
+            if (claimingQueue[i] == _poolId) {
+                claimingQueue[i] = claimingQueue[claimingQueue.length - 1];
+                claimingQueue.pop();
+            }
+        }
+
+    }
+
+    /**
+     * @dev skim the funds of a fully redeemed pool
+     */
+    function skimPool(uint256 _poolId) public cosmicAuthority {
+        if (!lotteryPools[_poolId].distributed) {
+            revert CannotSkimPool();
+        }
+        //TODO: maybe instead of just transfering, it can be allocated (to a new pool? for other things?)
+        payable(address(COSMIC_VAULT)).transfer(lotteryPools[_poolId].remainingPot);
     }
 
     /**
@@ -414,7 +479,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
 
         //get a random number between 0 and 100
         uint256 RNG = _randomWord % 101;
-
+        currentPool.numOfPlays++;
         //win or loose
         //CHECK for now 70% chance to win - only for development
         if (RNG < 70) {
@@ -430,7 +495,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
             //lose: mutate the token into the zodiak booster of choice
             ZDK.cosmicMutation(WHEEL_TICKET, _zodiakChoice, _owner);
         }
-        emit WheelSpinned(_poolId, _owner, win, _zodiakChoice);
+        emit WheelSpinned(_poolId, _owner, win, _zodiakChoice, currentPool.numberOfWinningTickets, currentPool.numOfPlays);
     }
 
     //TODO: complex function, check all security and logic thoroughly

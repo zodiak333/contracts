@@ -12,7 +12,7 @@ contract LotteryTest is Test {
     address public player1 = vm.addr(2);
 
     function setUp() public {
-        lottery = new ZodiakLottery(owner, owner, "https://zodiak333.casino");
+        lottery = new ZodiakLottery(owner, "https://zodiak333.casino");
         nft = ZodiakNFT(address(lottery.ZDK()));
     }
 

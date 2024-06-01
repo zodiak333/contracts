@@ -13,7 +13,7 @@ contract DeployLottery is Script {
     function run() external returns (ZodiakLottery) {
         vm.startBroadcast();
 
-        ZodiakLottery lottery = new ZodiakLottery(owner, owner, "");
+        ZodiakLottery lottery = new ZodiakLottery(owner, "");
         vm.stopBroadcast();
         return lottery;
     }
