@@ -247,6 +247,10 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         lotteryPools[_poolId].endTimestamp += _time;
     }
 
+    function timestamp() view public returns(uint256){
+        return block.timestamp;
+    }
+
     //=====================================================================================
     //
     //                     FUNCTIONS FOR THE LOTTERY
@@ -275,24 +279,28 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         allPoolDuration = _newDuration;
     }
 
-    function upkeepTallyPool() external cosmicAuthority {
+    //WARNING: tally pool pops an element of playingQueue
+    function upkeepTallyPool() public cosmicAuthority {
         if (playingQueue.length < 1) {
             revert QueueIsEmpty();
         }
         for(uint256 i = 0; i < playingQueue.length; i++) {
-            if (lotteryPools[playingQueue[i]].endTimestamp < block.timestamp && lotteryPools[playingQueue[i]].numberOfWinningTickets >= 10) {
-                tallyPool(playingQueue[i]);
+            uint256 poolId = playingQueue[i];
+            if (lotteryPools[poolId].endTimestamp < block.timestamp && lotteryPools[poolId].numberOfWinningTickets >= 10) {
+                tallyPool(poolId);
+                i = i--;
             }
         }
     }
 
-    function upkeepClosePool() external cosmicAuthority {
+    function upkeepClosePool() public cosmicAuthority {
         if (claimingQueue.length < 1) {
             revert QueueIsEmpty();
         }
         for(uint256 i = 0; i < claimingQueue.length; i++) {
             if (lotteryPools[claimingQueue[i]].tallied && lotteryPools[claimingQueue[i]].endTimestamp + claimPeriodDuration < block.timestamp) {
                 closePool(claimingQueue[i]);
+                i = i--;
             }
         }
     }
@@ -326,7 +334,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
      * @param _poolId the id of the pool to reveal the prize ticket from
      */
     function launchReveal(uint256 _poolId) external {
-        if (!lotteryPools[_poolId].tallied && lotteryPools[_poolId].distributed) {
+        if (lotteryPools[_poolId].tallied && lotteryPools[_poolId].distributed) {
             revert ClaimPeriodEnded();
         }
         if (ZDK.balanceOf(msg.sender, WINNING_TOKEN_ID) < 1 && userWinningTicketsCount[msg.sender][_poolId] < 1) {
@@ -591,7 +599,7 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
      * @param requestId The ID of the request sent to the VRF Coordinator
      * @param randomWords The random words sent by the VRF Coordinator
      */
-    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords) internal override {
+    function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override {
         RequestVRF memory request = requests[requestId];
         if (request.fulfilled) {
             revert RequestAlreadyFulfilled();
