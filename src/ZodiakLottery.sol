@@ -213,8 +213,10 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
     //
     //=====================================================================================
 
-    function setOverseer(address _overseer) external cosmicAuthority {
-        isOverseer[_overseer] = true;
+    function setOverseers(address[] calldata _overseers) external cosmicAuthority {
+        for(uint256 i = 0; i < _overseers.length; i++){
+            isOverseer[_overseers[i]] = true;
+        }
     }
 
     function removeOverseer(address[] calldata _overseers) public {
@@ -288,7 +290,9 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
             uint256 poolId = playingQueue[i];
             if (lotteryPools[poolId].endTimestamp < block.timestamp && lotteryPools[poolId].numberOfWinningTickets >= 10) {
                 tallyPool(poolId);
-                i = i--;
+                if(i != 0) {
+                    i = i--;
+                }
             }
         }
     }
@@ -300,7 +304,9 @@ contract ZodiakLottery is VRFConsumerBaseV2Plus {
         for(uint256 i = 0; i < claimingQueue.length; i++) {
             if (lotteryPools[claimingQueue[i]].tallied && lotteryPools[claimingQueue[i]].endTimestamp + claimPeriodDuration < block.timestamp) {
                 closePool(claimingQueue[i]);
-                i = i--;
+                if(i != 0) {
+                    i = i--;
+                }
             }
         }
     }
