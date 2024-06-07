@@ -45,7 +45,8 @@
   - [Admin Functions](#admin-functions)
 
 ---
-
+![Zodiak333 Banner](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/002/911/989/datas/gallery.jpg
+)
 ## Overview
 ZodiakLottery is a decentralized lottery system built for EVM compatible chains, utilizing Chainlink's Verifiable Random Function (VRF) to ensure fairness and randomness. The system employs NFTs, called ZodiakNFTs, for unrevealed tickets, winning/losing tickets, and prize tickets. This README provides a detailed guide on the smart contract functionalities.
 
@@ -156,6 +157,7 @@ ZodiakLottery is a decentralized lottery system built for EVM compatible chains,
 ## Deployment
 
 ### ZodiakLottery Deployment
+![Zodiak Lottery Building ](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/002/915/205/datas/original.png)
 
 To deploy the ZodiakLottery contract, follow these steps:
 
@@ -216,6 +218,8 @@ To properly integrate Chainlink VRF and Keepers, set the following parameters ma
 ## How the Lottery System Works
 
 ### Ticket IDs
+![Ticket IDs](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/002/914/692/datas/original.png)
+
 - **Wheel Ticket**: ID 0 - Represents a generic lottery ticket used for spins.
 - **Zodiac Sign - Bonus Ticket**: IDs 1 to 12 - Represents different zodiac sign boosters.
 - **Winning Undistributed Ticket**: ID 13 - Represents a ticket that has won but the prize is yet to be revealed.
@@ -310,6 +314,8 @@ Admin or overseer closes pools after the claim period ends by calling the `upkee
 ## Detailed Lottery Mechanics
 
 ### Winning vs. Losing Tickets
+
+![Zodiak Lottery Flow](https://d112y698adiu2z.cloudfront.net/photos/production/software_photos/002/915/210/datas/original.png)
 
 - **Winning Tickets**: When the wheel is spun, if the user wins, their Wheel Ticket (ID 0) is transformed into a Winning Undistributed Ticket (ID 13).
 - **Losing Tickets**: When the wheel is spun and the user loses, the Wheel Ticket (ID 0) is transformed into the user's chosen zodiac booster (IDs 1-12).
