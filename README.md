@@ -1,152 +1,231 @@
 # ZodiakLottery Smart Contract
 
+## Table of Contents
+- [Overview](#overview)
+- [Features](#features)
+- [Contracts](#contracts)
+  - [ZodiakLottery](#zodiaklottery)
+    - [State Variables](#state-variables)
+    - [Structs](#structs)
+    - [Errors](#errors)
+    - [Events](#events)
+    - [Modifiers](#modifiers)
+  - [ZodiakNFT](#zodiaknft)
+    - [State Variables](#zodiaknft-state-variables)
+    - [Structs](#zodiaknft-structs)
+    - [Modifiers](#zodiaknft-modifiers)
+  - [CosmicVault](#cosmicvault)
+    - [State Variables](#cosmicvault-state-variables)
+    - [Functions](#cosmicvault-functions)
+- [Deployment](#deployment)
+  - [ZodiakLottery Deployment](#zodiaklottery-deployment)
+  - [Chainlink Parameters](#chainlink-parameters)
+- [How the Lottery System Works](#how-the-lottery-system-works)
+  - [Ticket IDs](#ticket-ids)
+  - [Prize Tiers](#prize-tiers)
+- [User Interaction Flow](#user-interaction-flow)
+  - [Buying Tickets](#buying-tickets)
+  - [Spinning the Wheel](#spinning-the-wheel)
+  - [Claiming Prizes](#claiming-prizes)
+- [Admin Interaction Flow](#admin-interaction-flow)
+  - [Setting Overseers](#setting-overseers)
+  - [Creating a New Pool](#creating-a-new-pool)
+  - [Modifying Pool Duration](#modifying-pool-duration)
+  - [Tallying Pools](#tallying-pools)
+  - [Closing Pools](#closing-pools)
+- [Detailed Lottery Mechanics](#detailed-lottery-mechanics)
+  - [Winning vs. Losing Tickets](#winning-vs-losing-tickets)
+  - [Prize Tickets](#prize-tickets)de
+  - [Prize Distribution](#prize-distribution)
+- [Chainlink VRF and Keepers](#chainlink-vrf-and-keepers)
+- [Function Reference](#function-reference)
+  - [User Functions](#user-functions)
+  - [Chainlink VRF Functions](#chainlink-vrf-functions)
+  - [Chainlink Keeper Functions](#chainlink-keeper-functions)
+  - [Admin Functions](#admin-functions)
+
+---
+
 ## Overview
-ZodiakLottery is a decentralized lottery system built on Ethereum, integrating Chainlink VRF (Verifiable Random Function) to ensure fairness. The system uses NFTs (ZodiakNFT) to represent lottery tickets, winning tickets, and various prize tiers. This README provides an overview of the smart contract functionality, deployment instructions, and usage guidelines.
+ZodiakLottery is a decentralized lottery system built for EVM compatible chains, utilizing Chainlink's Verifiable Random Function (VRF) to ensure fairness and randomness. The system employs NFTs, called ZodiakNFTs, for unrevealed tickets, winning/losing tickets, and prize tickets. This README provides a detailed guide on the smart contract functionalities.
 
 ## Features
-- **Lottery Pools**: Time-bound pools where users can buy tickets and win prizes.
-- **Chainlink VRF Integration**: Ensures randomness of lottery outcomes.
-- **NFT Tickets**: Uses ZodiakNFTs for lottery tickets, winning tickets, and prize tickets.
+- **Lottery Pools**: Time-bound lottery pools where participants can purchase tickets and win prizes.
+- **Chainlink VRF Integration**: Ensures the randomness and fairness of lottery outcomes.
+- **NFT-Based Tickets**: Utilizes ZodiakNFTs to manage lottery tickets, winners, and prize tiers.
 - **Automated Pool Management**: Pools are automatically tallied and closed after specific durations.
-- **Chainlink Keepers**: Automation for tallying and closing pools is handled by Chainlink Keepers to ensure smooth and timely operations.
-- **Dynamic Prize Distribution**: Different prize tiers with dynamic prize amounts.
+- **Chainlink Keepers**: Automate the tallying and closing processes to ensure smooth operations.
+- **Dynamic Prize Distribution**: Implements multiple prize tiers with dynamically calculated prize amounts.
 
 ## Contracts
 
 ### ZodiakLottery
 
 #### State Variables
-- **ZDK**: Instance of the ZodiakNFT contract.
-- **COSMIC_VAULT**: Instance of the CosmicVault contract.
-- **theMighty**: Address of the contract creator/administrator.
-- **ticketPrice**: Price of a lottery ticket (0.01 ETH).
-- **reserve**: Reserve balance for the lottery.
-- **allPoolDuration**: Duration of each pool (600 seconds).
-- **claimPeriodDuration**: Duration for claiming prizes after a pool ends (600 seconds).
-- **lotteryPools**: Array of all lottery pools.
-- **playingQueue**: Queue for managing active pools.
-- **claimingQueue**: Queue for managing pools in the claiming period.
-- **isOverseer**: Mapping to track overseers.
+- **ZDK**: `ZodiakNFT` contract instance for managing NFTs.
+- **COSMIC_VAULT**: `CosmicVault` contract instance for handling lottery funds.
+- **theMighty**: Address of the contract's administrator.
+- **ticketPrice**: Price for each lottery ticket, set at 0.01 ETH.
+- **reserve**: Reserve balance for operational liquidity.
+- **allPoolDuration**: Default duration for each lottery pool (600 seconds).
+- **claimPeriodDuration**: Period allowed for claiming prizes after a pool closes (600 seconds).
+- **lotteryPools**: Array containing all lottery pools.
+- **playingQueue**: Queue managing active lottery pools.
+- **claimingQueue**: Queue managing pools in the claiming period.
+- **isOverseer**: Mapping of addresses authorized as overseers.
 - **requests**: Mapping of VRF requests.
-- **userWinningTicketsCount**: Mapping to track winning tickets per user per pool.
+- **userWinningTicketsCount**: Mapping to track the count of winning tickets per user per pool.
 
 #### Structs
-
-- **Pool**: Represents a lottery pool.
-  - **poolId**: ID of the pool.
+- **Pool**: Defines the structure of a lottery pool.
+  - **poolId**: Unique identifier for the pool.
   - **startTimestamp**: Start time of the pool.
   - **endTimestamp**: End time of the pool.
-  - **numOfPlays**: Number of plays in the pool.
-  - **pot**: Total amount of money in the pool.
-  - **remainingPot**: Amount of money left in the pool.
+  - **numOfPlays**: Total plays in the pool.
+  - **pot**: Total ETH accumulated in the pool.
+  - **remainingPot**: Remaining ETH after prize distribution.
   - **numberOfWinningTickets**: Number of winning tickets in the pool.
-  - **tierPot**: Prize amounts for each tier.
-  - **winningTicketsRemaining**: Number of winning tickets remaining for each prize tier.
-  - **prizeAmount_4_5**: Amount of prize 4 and 5 each prize ticket will get.
-  - **unusedPrizeTickets**: Number of prize tickets not claimed.
+  - **tierPot**: Distribution of prize amounts across different tiers.
+  - **winningTicketsRemaining**: Count of unclaimed winning tickets.
+  - **prizeAmount_4_5**: Prize amount for the 4th and 5th tier prizes.
+  - **unusedPrizeTickets**: Count of unclaimed prize tickets.
   - **tallied**: Indicates if the pool has been tallied.
-  - **distributed**: Indicates if the pool has been distributed.
+  - **distributed**: Indicates if the pool's prizes have been distributed.
 
-- **RequestVRF**: Represents a request to the VRF Coordinator.
-  - **zodiakChoice**: Zodiac booster choice in case of loss.
-  - **poolId**: ID of the pool.
+- **RequestVRF**: Details of a VRF request to Chainlink.
+  - **zodiakChoice**: Chosen Zodiac booster in case of a loss.
+  - **poolId**: Identifier of the pool associated with the request.
   - **isSpin**: Indicates if the request is to spin the wheel.
-  - **fulfilled**: Indicates if the request has been fulfilled.
+  - **fulfilled**: Status of request fulfillment.
   - **requester**: Address of the user who made the request.
 
 #### Errors
-
-- **IncorrectAmount**: Thrown when the amount sent is incorrect.
+- **IncorrectAmount**: Thrown when the sent amount is incorrect.
 - **InvalidId**: Thrown when an invalid ID is used.
-- **CannotTallyPool**: Thrown when unable to tally the pool.
-- **NoWinningTickets**: Thrown when there are no winning tickets.
-- **CannotSkimPool**: Thrown when unable to skim the pool.
-- **CannotSpinTheWheel**: Thrown when unable to spin the wheel.
-- **InsufficientBalance**: Thrown when the balance is insufficient.
-- **CannotCreateNewPool**: Thrown when unable to create a new pool.
-- **RequestAlreadyFulfilled**: Thrown when a request is already fulfilled.
-- **ClaimPeriodEnded**: Thrown when the claim period has ended.
-- **TransferFailed**: Thrown when a transfer fails.
-- **QueueIsEmpty**: Thrown when the queue is empty.
+- **CannotTallyPool**: Thrown when the pool cannot be tallied.
+- **NoWinningTickets**: Thrown when no winning tickets are available.
+- **CannotSkimPool**: Thrown when unclaimed funds cannot be recovered.
+- **CannotSpinTheWheel**: Thrown when the wheel spin fails.
+- **InsufficientBalance**: Thrown when the contract balance is insufficient.
+- **CannotCreateNewPool**: Thrown when creating a new pool fails.
+- **RequestAlreadyFulfilled**: Thrown when a request has already been fulfilled.
+- **ClaimPeriodEnded**: Thrown when the prize claim period has ended.
+- **TransferFailed**: Thrown when an ETH transfer operation fails.
+- **QueueIsEmpty**: Thrown when attempting to access an empty queue.
 
 #### Events
-
-- **PoolTallied**: Emitted when a pool is tallied.
-- **PrizeClaimed**: Emitted when a prize is claimed in a pool.
-- **LotteryTicketCreated**: Emitted when a lottery ticket is created.
+- **PoolTallied**: Emitted when a pool is successfully tallied.
+- **PrizeClaimed**: Emitted when a prize is claimed.
+- **LotteryTicketCreated**: Emitted when a new lottery ticket is generated.
 - **WheelSpinned**: Emitted when the wheel is spun.
-- **RequestFulfilled**: Emitted when a VRF request is fulfilled.
+- **RequestFulfilled**: Emitted when a Chainlink VRF request is fulfilled.
 - **PoolCreated**: Emitted when a new pool is created.
 
 #### Modifiers
-
-- **cosmicAuthority**: Restricts function calls to overseers, theMighty, or the contract itself.
+- **cosmicAuthority**: Restricts function calls to authorized overseers, the contract administrator (theMighty), or the contract itself.
 
 ### ZodiakNFT
 
 #### State Variables
 - **theMighty**: Address of the contract creator/administrator.
-- **cosmicLottery**: Address of the lottery contract.
-- **maxCollections**: Maximum number of collections (18).
-- **maxZodiaks**: Maximum number of zodiac signs (12).
-- **zodiakBonuses**: Mapping of zodiac bonuses.
+- **cosmicLottery**: Address of the linked lottery contract.
+- **maxCollections**: Maximum number of NFT collections (set to 18).
+- **maxZodiaks**: Maximum number of zodiac signs (set to 12).
+- **zodiakBonuses**: Mapping that stores bonuses for each zodiac sign.
 
 #### Structs
-
-- **Zodiak**: Represents a zodiac's attributes.
-  - **strength**: Strength attribute.
-  - **agility**: Agility attribute.
-  - **intelligence**: Intelligence attribute.
-  - **vitality**: Vitality attribute.
-  - **luck**: Luck attribute.
+- **Zodiak**: Represents the attributes of a zodiac.
+  - **strength**: Strength attribute of the zodiac.
+  - **agility**: Agility attribute of the zodiac.
+  - **intelligence**: Intelligence attribute of the zodiac.
+  - **vitality**: Vitality attribute of the zodiac.
+  - **luck**: Luck attribute of the zodiac.
 
 #### Modifiers
-
-- **cosmicAuthority**: Restricts function calls to the lottery contract or theMighty.
+- **cosmicAuthority**: Restricts function calls to either the lottery contract or theMighty.
 
 ### CosmicVault
 
 #### State Variables
-- **vaulting**: Tracks the amount of funds in the vault.
+- **vaulting**: Tracks the amount of ETH in the vault.
 
 #### Functions
-
 - **receive**: Handles the reception of ETH into the vault.
 - **fallback**: Handles fallback reception of ETH into the vault.
 
 ## Deployment
 
+### ZodiakLottery Deployment
 
+To deploy the ZodiakLottery contract, follow these steps:
 
-#### ZodiakLottery
-## Deployment Details
+1. **Deploy ZodiakNFT Contract**:
+   - Deploy the `ZodiakNFT` contract first.
+   - Note the deployed contract address.
 
-For deployment, the following parameters are required:
+2. **Deploy CosmicVault Contract**:
+   - Deploy the `CosmicVault` contract to handle ETH.
+   - Note the deployed contract address.
 
-- **Sepolia VRF Coordinator Address**
-- **Chainlink Subscription ID**
-- **Keyhash**
-- **Administrator Address (theMighty)**
-- **URI for NFT Metadata**
+3. **Deploy ZodiakLottery Contract**:
+   - Deploy the `ZodiakLottery` contract with the following parameters:
+     - `Sepolia VRF Coordinator Address`: The address of the Chainlink VRF Coordinator for the Sepolia test network.
+     - `Chainlink Subscription ID`: Your subscription ID for Chainlink VRF.
+     - `Keyhash`: The keyhash provided by Chainlink for VRF requests.
+     - `Administrator Address (theMighty)`: The address that will act as the administrator.
+     - `ZodiakNFT Contract Address`: The address of the deployed `ZodiakNFT` contract.
+     - `CosmicVault Contract Address`: The address of the deployed `CosmicVault` contract.
+     - `URI for NFT Metadata`: Base URI for ZodiakNFT metadata.
 
+4. **Link Contracts**:
+   - Set the `ZodiakNFT` contract address in the `ZodiakLottery` contract to enable integration.
 
- Ensure both contracts are properly linked by setting the NFT contract address in the lottery contract.
+### Chainlink Parameters
+
+To properly integrate Chainlink VRF and Keepers, set the following parameters manually during deployment and configuration:
+
+#### Chainlink VRF Parameters
+- **VRF Coordinator Address**:
+  - The address of the Chainlink VRF Coordinator specific to your network (e.g., Sepolia).
+  - For Sepolia: `0x8103B0A8A00be2DDC778e6e7eaa21791Cd364625`
+
+- **Subscription ID**:
+  - Your Chainlink subscription ID used to fund the VRF requests.
+  - Obtain this from your Chainlink account.
+
+- **Keyhash**:
+  - A unique identifier for the VRF key pair you will be using.
+  - This is provided by Chainlink and ensures your contract gets the correct random values.
+
+- **Link Token**:
+  - Ensure your contract has sufficient LINK to pay for the VRF requests.
+  - Fund your subscription with enough LINK tokens to cover VRF fees.
+
+#### Chainlink Keepers Parameters
+- **Keeper Registry Address**:
+  - The address of the Chainlink Keeper Registry specific to your network.
+  - For Sepolia: `0x86EFBD0b6736Bed994962f9797049422A3A8E8Ad`
+
+- **Keepers Subscription ID**:
+  - Your Chainlink Keepers subscription ID to automate your contract’s functions.
+  - Obtain this from your Chainlink account.
+
+- **Automation Parameters**:
+  - Configure the interval and functions that the Keepers will automate, such as pool tallying and closing.
 
 ## How the Lottery System Works
 
 ### Ticket IDs
-
-- **Wheel Ticket**: ID 0
-- **Zodiac Sign - Bonus Ticket**: ID 1 - 12
-- **Winning Undistributed Ticket**: ID 13
+- **Wheel Ticket**: ID 0 - Represents a generic lottery ticket used for spins.
+- **Zodiac Sign - Bonus Ticket**: IDs 1 to 12 - Represents different zodiac sign boosters.
+- **Winning Undistributed Ticket**: ID 13 - Represents a ticket that has won but the prize is yet to be revealed.
 
 ### Prize Tiers
-
-- **Prize 1**: ID 14
+- **Prize 1**: ID 14 - Highest tier prize.
 - **Prize 2**: ID 15
 - **Prize 3**: ID 16
 - **Prize 4**: ID 17
-- **Prize 5**: ID 18
+- **Prize 5**: ID 18 - Lowest tier prize.
 
 ### User Interaction Flow
 
@@ -295,3 +374,5 @@ The prize amounts are dynamically calculated based on the pool's pot and the num
 - **upkeepClosePool()**: Close pools after the claim period ends.
 - **setPrice(uint256 _price)**: Set the price of a lottery ticket.
 - **fulfillRandomWord() [RNG]**: Handle the random word received from Chainlink.
+
+- 
